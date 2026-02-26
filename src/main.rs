@@ -18,7 +18,7 @@ mod navigation;
 mod services;
 mod ui;
 
-use app::{app::App, events::AppEvent};
+use app::{app::App, events::AppEvent, state::KeyMode};
 
 use ui::{explorer, layout, player, sidebar};
 
@@ -45,22 +45,44 @@ async fn main() -> anyhow::Result<()> {
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => {
-                        tx.send(AppEvent::Quit)?;
-                    }
+                match app.state.key_mode {
+                    KeyMode::Normal => match key.code {
+                        KeyCode::Char('q') => {
+                            tx.send(AppEvent::Quit)?;
+                        }
 
-                    // Down movement
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        tx.send(AppEvent::NavigateDown)?;
-                    }
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            tx.send(AppEvent::NavigateDown)?;
+                        }
 
-                    // Up movement
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        tx.send(AppEvent::NavigateUp)?;
-                    }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            tx.send(AppEvent::NavigateUp)?;
+                        }
 
-                    _ => {}
+                        KeyCode::Char('g') => {
+                            tx.send(AppEvent::EnterGMode)?;
+                        }
+
+                        _ => {}
+                    },
+
+                    KeyMode::AwaitingG => match key.code {
+                        KeyCode::Char('p') => {
+                            tx.send(AppEvent::JumpToPlaylists)?;
+                        }
+
+                        KeyCode::Char('l') => {
+                            tx.send(AppEvent::JumpToLiked)?;
+                        }
+
+                        KeyCode::Char('a') => {
+                            tx.send(AppEvent::JumpToArtists)?;
+                        }
+
+                        _ => {
+                            tx.send(AppEvent::ExitGMode)?;
+                        }
+                    },
                 }
             }
         }
