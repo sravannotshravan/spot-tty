@@ -1,29 +1,23 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-pub struct LayoutAreas {
+pub struct Areas {
     pub sidebar: Rect,
     pub main: Rect,
     pub player: Rect,
 }
 
-pub fn split(area: Rect) -> LayoutAreas {
+pub fn split(area: Rect) -> Areas {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ])
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
         .split(area);
 
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(30),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
         .split(vertical[0]);
 
-    LayoutAreas {
+    Areas {
         sidebar: horizontal[0],
         main: horizontal[1],
         player: vertical[1],

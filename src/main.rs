@@ -8,7 +8,6 @@ use crossterm::{
 };
 
 use ratatui::{backend::CrosstermBackend, Terminal};
-
 use tokio::sync::mpsc;
 
 mod app;
@@ -19,8 +18,6 @@ mod services;
 mod ui;
 
 use app::{app::App, events::AppEvent, state::KeyMode};
-
-use ui::{explorer, layout, player, sidebar};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -36,53 +33,88 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         terminal.draw(|frame| {
-            let areas = layout::split(frame.size());
+            let areas = ui::layout::split(frame.size());
 
-            sidebar::render(frame, areas.sidebar, &app.state);
-            explorer::render(frame, areas.main, &app.state);
-            player::render(frame, areas.player, &app.state);
+            ui::sidebar::render(frame, areas.sidebar, &app.state);
+            ui::explorer::render(frame, areas.main, &app.state);
+            ui::player::render(frame, areas.player, &app.state);
         })?;
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                // Handle numeric prefix
+                if let KeyCode::Char(c) = key.code {
+                    if c.is_ascii_digit() {
+                        let digit = c.to_digit(10).unwrap() as usize;
+                        let current = app.state.pending_count.unwrap_or(0);
+                        app.state.pending_count = Some(current * 10 + digit);
+                        continue;
+                    }
+                }
+
+                let count = app.state.pending_count.take().unwrap_or(1);
+
                 match app.state.key_mode {
-                    KeyMode::Normal => match key.code {
-                        KeyCode::Char('q') => {
-                            tx.send(AppEvent::Quit)?;
+                    KeyMode::Normal => {
+                        match key.code {
+                            // Movement
+                            KeyCode::Char('j') | KeyCode::Down => {
+                                tx.send(AppEvent::MoveDown(count))?
+                            }
+
+                            KeyCode::Char('k') | KeyCode::Up => tx.send(AppEvent::MoveUp(count))?,
+
+                            // Go bottom
+                            KeyCode::Char('G') => tx.send(AppEvent::GoBottom)?,
+
+                            // Go middle
+                            KeyCode::Char('M') => tx.send(AppEvent::GoMiddle)?,
+
+                            // g prefix
+                            KeyCode::Char('g') => {
+                                if app.state.awaiting_gg {
+                                    app.state.awaiting_gg = false;
+                                    tx.send(AppEvent::GoTop)?;
+                                } else {
+                                    app.state.awaiting_gg = true;
+                                    app.state.key_mode = KeyMode::AwaitingG;
+                                }
+                            }
+
+                            // Focus right
+                            KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
+                                tx.send(AppEvent::Enter)?
+                            }
+
+                            // Focus left
+                            KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+                                tx.send(AppEvent::Back)?
+                            }
+
+                            KeyCode::Char('q') => tx.send(AppEvent::Quit)?,
+
+                            _ => {
+                                app.state.awaiting_gg = false;
+                            }
+                        }
+                    }
+
+                    KeyMode::AwaitingG => {
+                        match key.code {
+                            KeyCode::Char('p') => tx.send(AppEvent::JumpToPlaylists)?,
+
+                            KeyCode::Char('l') => tx.send(AppEvent::JumpToLiked)?,
+
+                            KeyCode::Char('a') => tx.send(AppEvent::JumpToArtists)?,
+
+                            KeyCode::Char('g') => tx.send(AppEvent::GoTop)?,
+
+                            _ => {}
                         }
 
-                        KeyCode::Char('j') | KeyCode::Down => {
-                            tx.send(AppEvent::NavigateDown)?;
-                        }
-
-                        KeyCode::Char('k') | KeyCode::Up => {
-                            tx.send(AppEvent::NavigateUp)?;
-                        }
-
-                        KeyCode::Char('g') => {
-                            tx.send(AppEvent::EnterGMode)?;
-                        }
-
-                        _ => {}
-                    },
-
-                    KeyMode::AwaitingG => match key.code {
-                        KeyCode::Char('p') => {
-                            tx.send(AppEvent::JumpToPlaylists)?;
-                        }
-
-                        KeyCode::Char('l') => {
-                            tx.send(AppEvent::JumpToLiked)?;
-                        }
-
-                        KeyCode::Char('a') => {
-                            tx.send(AppEvent::JumpToArtists)?;
-                        }
-
-                        _ => {
-                            tx.send(AppEvent::ExitGMode)?;
-                        }
-                    },
+                        app.state.key_mode = KeyMode::Normal;
+                        app.state.awaiting_gg = false;
+                    }
                 }
             }
         }

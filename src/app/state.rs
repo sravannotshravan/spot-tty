@@ -3,10 +3,10 @@ pub struct NavigationState {
 }
 
 #[derive(Clone)]
-pub enum ExplorerContext {
-    Playlist(String),
-    LikedSongs,
-    Artist(String),
+pub enum ExplorerNode {
+    PlaylistTracks(String),
+    ArtistAlbums(String),
+    LikedTracks,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -15,9 +15,21 @@ pub enum KeyMode {
     AwaitingG,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    Sidebar,
+    Explorer,
+}
+
 pub struct AppState {
     pub should_quit: bool,
     pub navigation: NavigationState,
-    pub explorer: ExplorerContext,
+    pub explorer_stack: Vec<ExplorerNode>,
+    pub explorer_selected_index: usize,
     pub key_mode: KeyMode,
+    pub focus: Focus,
+
+    // 🔥 New Vim state
+    pub pending_count: Option<usize>,
+    pub awaiting_gg: bool,
 }
