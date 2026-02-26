@@ -23,13 +23,17 @@ pub enum Focus {
 
 pub struct AppState {
     pub should_quit: bool,
+
     pub navigation: NavigationState,
     pub explorer_stack: Vec<ExplorerNode>,
     pub explorer_selected_index: usize,
+
     pub key_mode: KeyMode,
     pub focus: Focus,
 
-    // 🔥 New Vim state
     pub pending_count: Option<usize>,
     pub awaiting_gg: bool,
+
+    // NEW
+    pub playback_progress: f64,
 }

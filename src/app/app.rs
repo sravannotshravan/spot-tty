@@ -20,9 +20,11 @@ impl App {
                 key_mode: KeyMode::Normal,
                 focus: Focus::Sidebar,
 
-                // 🔥 Initialize new vim state fields
                 pending_count: None,
                 awaiting_gg: false,
+
+                // example static progress
+                playback_progress: 0.35,
             },
         }
     }

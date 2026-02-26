@@ -1,6 +1,6 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
@@ -49,12 +49,8 @@ fn render_section(
     for row in 0..height {
         if row < items.len() {
             let absolute_index = offset + row;
-
-            let number: usize = if state.focus == Focus::Sidebar {
-                (absolute_index as isize - state.navigation.selected_index as isize).abs() as usize
-            } else {
-                absolute_index
-            };
+            let number =
+                (absolute_index as isize - state.navigation.selected_index as isize).abs() as usize;
 
             rows.push(ListItem::new(format!("{:>3} │ {}", number, items[row])));
         } else {
@@ -70,15 +66,14 @@ fn render_section(
         list_state.select(Some(state.navigation.selected_index - offset));
     }
 
-    let highlight_style = if state.focus == Focus::Sidebar {
-        Style::default().bg(Color::White).fg(Color::Black)
-    } else {
-        Style::default().bg(Color::DarkGray).fg(Color::White)
-    };
-
     let list = List::new(rows)
         .block(Block::default().title(title).borders(Borders::ALL))
-        .highlight_style(highlight_style);
+        .highlight_style(
+            Style::default()
+                .bg(Color::Rgb(60, 65, 80))
+                .fg(Color::Rgb(245, 224, 220))
+                .add_modifier(Modifier::BOLD),
+        );
 
     frame.render_stateful_widget(list, area, &mut list_state);
 }

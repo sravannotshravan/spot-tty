@@ -8,6 +8,7 @@ use crossterm::{
 };
 
 use ratatui::{backend::CrosstermBackend, Terminal};
+
 use tokio::sync::mpsc;
 
 mod app;
@@ -22,6 +23,7 @@ use app::{app::App, events::AppEvent, state::KeyMode};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     enable_raw_mode()?;
+
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
 
@@ -32,17 +34,23 @@ async fn main() -> anyhow::Result<()> {
     let mut app = App::new();
 
     loop {
+        // ─────────────────────────────────────────────
+        // DRAW
+        // ─────────────────────────────────────────────
         terminal.draw(|frame| {
             let areas = ui::layout::split(frame.size());
 
             ui::sidebar::render(frame, areas.sidebar, &app.state);
             ui::explorer::render(frame, areas.main, &app.state);
-            ui::player::render(frame, areas.player, &app.state);
+            ui::player::render(frame, areas.control, &app.state);
         })?;
 
+        // ─────────────────────────────────────────────
+        // INPUT
+        // ─────────────────────────────────────────────
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
-                // Handle numeric prefix
+                // Numeric prefix handling (e.g., 33j)
                 if let KeyCode::Char(c) = key.code {
                     if c.is_ascii_digit() {
                         let digit = c.to_digit(10).unwrap() as usize;
@@ -70,15 +78,9 @@ async fn main() -> anyhow::Result<()> {
                             // Go middle
                             KeyCode::Char('M') => tx.send(AppEvent::GoMiddle)?,
 
-                            // g prefix
+                            // g prefix handling
                             KeyCode::Char('g') => {
-                                if app.state.awaiting_gg {
-                                    app.state.awaiting_gg = false;
-                                    tx.send(AppEvent::GoTop)?;
-                                } else {
-                                    app.state.awaiting_gg = true;
-                                    app.state.key_mode = KeyMode::AwaitingG;
-                                }
+                                app.state.key_mode = KeyMode::AwaitingG;
                             }
 
                             // Focus right
@@ -91,34 +93,35 @@ async fn main() -> anyhow::Result<()> {
                                 tx.send(AppEvent::Back)?
                             }
 
+                            // Quit
                             KeyCode::Char('q') => tx.send(AppEvent::Quit)?,
 
-                            _ => {
-                                app.state.awaiting_gg = false;
-                            }
+                            _ => {}
                         }
                     }
 
                     KeyMode::AwaitingG => {
                         match key.code {
+                            KeyCode::Char('g') => tx.send(AppEvent::GoTop)?,
+
                             KeyCode::Char('p') => tx.send(AppEvent::JumpToPlaylists)?,
 
                             KeyCode::Char('l') => tx.send(AppEvent::JumpToLiked)?,
 
                             KeyCode::Char('a') => tx.send(AppEvent::JumpToArtists)?,
 
-                            KeyCode::Char('g') => tx.send(AppEvent::GoTop)?,
-
                             _ => {}
                         }
 
                         app.state.key_mode = KeyMode::Normal;
-                        app.state.awaiting_gg = false;
                     }
                 }
             }
         }
 
+        // ─────────────────────────────────────────────
+        // EVENT PROCESSING
+        // ─────────────────────────────────────────────
         while let Ok(event) = rx.try_recv() {
             app.handle_event(event);
         }
@@ -128,6 +131,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // ─────────────────────────────────────────────
+    // CLEANUP
+    // ─────────────────────────────────────────────
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
