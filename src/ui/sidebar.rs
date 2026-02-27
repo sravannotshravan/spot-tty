@@ -6,10 +6,6 @@ use ratatui::{
     Frame,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Highlight styles
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn active_highlight() -> Style {
     Style::default()
         .bg(Color::Rgb(60, 65, 80))
@@ -24,12 +20,7 @@ fn inactive_highlight() -> Style {
         .add_modifier(Modifier::DIM)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Entry point
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    // Outer split: user box (fixed 3 lines) + library sections (remaining)
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
@@ -37,19 +28,15 @@ pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) 
 
     render_user_box(frame, outer[0], state);
 
-    // New order: Playlists (50%) | Artists (40%) | Liked Songs (fixed 3)
-    // Liked Songs is a single entry so it gets a fixed-height box at the bottom.
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(0),         // Playlists — takes remaining space
-            Constraint::Percentage(40), // Artists — 40% of the library area
-            Constraint::Length(3),      // Liked Songs — always exactly one row tall
+            Constraint::Min(0),    // Playlists
+            Constraint::Length(3), // Liked Songs
         ])
         .split(outer[1]);
 
     let pl_len = state.playlists.len();
-    let ar_len = state.artists.len();
 
     render_section(
         frame,
@@ -68,36 +55,17 @@ pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) 
     render_section(
         frame,
         sections[1],
-        " Artists ",
-        &state
-            .artists
-            .iter()
-            .map(|a| a.name.as_str())
-            .collect::<Vec<_>>(),
-        state,
-        pl_len, // Artists start right after playlists
-        state.loaded_artists,
-    );
-
-    render_section(
-        frame,
-        sections[2],
         " Liked Songs ",
         &["Liked Songs"],
         state,
-        pl_len + ar_len, // Liked Songs is last
+        pl_len,
         state.loaded_liked,
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sub-widgets
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn render_user_box(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let name = state.user_name.as_deref().unwrap_or("Connecting…");
-
-    let paragraph = Paragraph::new(format!(" {}", name))
+    let paragraph = Paragraph::new(format!(" {name}"))
         .style(Style::default().fg(Color::Rgb(205, 214, 244)))
         .block(
             Block::default()
@@ -105,7 +73,6 @@ fn render_user_box(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSt
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Rgb(88, 91, 112))),
         );
-
     frame.render_widget(paragraph, area);
 }
 
@@ -125,7 +92,6 @@ fn render_section(
         inactive_highlight()
     };
 
-    // ── Show loading placeholder until data arrives ────────────────────────
     if !loaded {
         let p = Paragraph::new(" Loading…")
             .style(Style::default().fg(Color::Rgb(100, 100, 110)))
@@ -134,18 +100,16 @@ fn render_section(
         return;
     }
 
-    // ── Build ALL items (not capped at height) so ratatui can scroll ───────
     let rows: Vec<ListItem> = items
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let absolute = offset + i;
-            let rel = (absolute as isize - state.navigation.selected_index as isize).unsigned_abs();
-            ListItem::new(format!("{:>3} │ {}", rel, name))
+            let abs = offset + i;
+            let rel = (abs as isize - state.navigation.selected_index as isize).unsigned_abs();
+            ListItem::new(format!("{rel:>3} │ {name}"))
         })
         .collect();
 
-    // Set the selected index within this section so ratatui scrolls correctly
     let mut list_state = ListState::default();
     if state.navigation.selected_index >= offset
         && state.navigation.selected_index < offset + items.len()

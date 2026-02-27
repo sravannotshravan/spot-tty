@@ -1,14 +1,12 @@
-use std::io;
-use std::time::Instant;
-
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-
 use ratatui::{backend::CrosstermBackend, Terminal};
 use rspotify::AuthCodePkceSpotify;
+use std::io;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
@@ -29,17 +27,13 @@ use services::{auth, spotify as svc};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Logging
     let log_file = std::fs::File::create("/tmp/spot-tty.log")?;
     tracing_subscriber::fmt()
         .with_writer(log_file)
         .with_ansi(false)
         .init();
 
-    // Config
     let settings = Settings::load()?;
-
-    // Auth
     let spotify: AuthCodePkceSpotify = auth::authenticate(
         &settings.client_id,
         &settings.client_secret,
@@ -47,7 +41,6 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    // TUI setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -56,17 +49,14 @@ async fn main() -> anyhow::Result<()> {
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
     let mut app = App::new();
-
     spawn_initial_fetches(spotify.clone(), tx.clone());
 
     let tick_rate = Duration::from_millis(80);
     let mut last_tick = Instant::now();
-
     let mut last_fetched_stack: Option<ExplorerNode> = None;
     let mut explorer_fetch_in_progress = false;
 
     loop {
-        // Animation tick
         if last_tick.elapsed() >= tick_rate {
             last_tick = Instant::now();
             app.state.playback_progress += 0.01;
@@ -76,7 +66,6 @@ async fn main() -> anyhow::Result<()> {
             app.state.visualizer_phase = (app.state.visualizer_phase + 1) % 1000;
         }
 
-        // Draw
         terminal.draw(|frame| {
             let areas = ui::layout::split(frame.size());
             ui::sidebar::render(frame, areas.sidebar, &app.state);
@@ -84,10 +73,9 @@ async fn main() -> anyhow::Result<()> {
             ui::player::render(frame, areas.control, &app.state);
         })?;
 
-        // Drain async events
         while let Ok(event) = rx.try_recv() {
             match &event {
-                AppEvent::ExplorerTracksLoaded(_) | AppEvent::ExplorerAlbumsLoaded(_) => {
+                AppEvent::ExplorerTracksLoaded(_) | AppEvent::LoadError(_) => {
                     explorer_fetch_in_progress = false;
                 }
                 _ => {}
@@ -95,7 +83,10 @@ async fn main() -> anyhow::Result<()> {
             app.handle_event(event);
         }
 
-        // Lazy explorer fetch
+        if app.state.explorer_fetch_pending && !explorer_fetch_in_progress {
+            last_fetched_stack = None;
+        }
+
         maybe_fetch_explorer(
             &app.state.explorer_stack.last().cloned(),
             &mut last_fetched_stack,
@@ -104,20 +95,17 @@ async fn main() -> anyhow::Result<()> {
             tx.clone(),
         );
 
-        // Input
         if event::poll(Duration::from_millis(10))? {
             if let Event::Key(key) = event::read()? {
                 if let KeyCode::Char(c) = key.code {
                     if c.is_ascii_digit() {
                         let digit = c.to_digit(10).unwrap() as usize;
-                        let current = app.state.pending_count.unwrap_or(0);
-                        app.state.pending_count = Some(current * 10 + digit);
+                        let cur = app.state.pending_count.unwrap_or(0);
+                        app.state.pending_count = Some(cur * 10 + digit);
                         continue;
                     }
                 }
-
                 let count = app.state.pending_count.take().unwrap_or(1);
-
                 match app.state.key_mode {
                     KeyMode::Normal => match key.code {
                         KeyCode::Char('j') | KeyCode::Down => tx.send(AppEvent::MoveDown(count))?,
@@ -139,7 +127,6 @@ async fn main() -> anyhow::Result<()> {
                             KeyCode::Char('g') => tx.send(AppEvent::GoTop)?,
                             KeyCode::Char('p') => tx.send(AppEvent::JumpToPlaylists)?,
                             KeyCode::Char('l') => tx.send(AppEvent::JumpToLiked)?,
-                            KeyCode::Char('a') => tx.send(AppEvent::JumpToArtists)?,
                             _ => {}
                         }
                         app.state.key_mode = KeyMode::Normal;
@@ -156,7 +143,6 @@ async fn main() -> anyhow::Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
-
     Ok(())
 }
 
@@ -168,53 +154,35 @@ fn spawn_initial_fetches(spotify: AuthCodePkceSpotify, tx: mpsc::UnboundedSender
                 Ok(user) => {
                     let user_id = user.id.clone();
                     let _ = tx.send(AppEvent::UserLoaded(user.display_name));
-
                     match svc::fetch_playlists(&sp, &user_id).await {
                         Ok(pl) => {
                             let _ = tx.send(AppEvent::PlaylistsLoaded(pl));
                         }
                         Err(e) => {
-                            tracing::error!("fetch_playlists failed: {e:#}");
+                            tracing::error!("fetch_playlists: {e:#}");
                             let _ = tx.send(AppEvent::PlaylistsLoaded(vec![]));
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::error!("fetch_user failed: {e:#}");
+                    tracing::error!("fetch_user: {e:#}");
                     let _ = tx.send(AppEvent::LoadError(format!("Profile: {e}")));
                     let _ = tx.send(AppEvent::PlaylistsLoaded(vec![]));
                 }
             }
         });
     }
-
     {
         let (sp, tx) = (spotify.clone(), tx.clone());
         tokio::spawn(async move {
             sleep(Duration::from_millis(300)).await;
             match svc::fetch_liked_tracks(&sp).await {
-                Ok(tracks) => {
-                    let _ = tx.send(AppEvent::LikedTracksLoaded(tracks));
+                Ok(t) => {
+                    let _ = tx.send(AppEvent::LikedTracksLoaded(t));
                 }
                 Err(e) => {
-                    tracing::error!("fetch_liked_tracks failed: {e:#}");
+                    tracing::error!("fetch_liked_tracks: {e:#}");
                     let _ = tx.send(AppEvent::LikedTracksLoaded(vec![]));
-                }
-            }
-        });
-    }
-
-    {
-        let (sp, tx) = (spotify.clone(), tx.clone());
-        tokio::spawn(async move {
-            sleep(Duration::from_millis(600)).await;
-            match svc::fetch_followed_artists(&sp).await {
-                Ok(artists) => {
-                    let _ = tx.send(AppEvent::ArtistsLoaded(artists));
-                }
-                Err(e) => {
-                    tracing::error!("fetch_followed_artists failed: {e:#}");
-                    let _ = tx.send(AppEvent::ArtistsLoaded(vec![]));
                 }
             }
         });
@@ -260,22 +228,6 @@ fn maybe_fetch_explorer(
                 }
             });
         }
-
-        Some(ExplorerNode::ArtistAlbums(id, _)) => {
-            let id = id.clone();
-            tokio::spawn(async move {
-                match svc::fetch_artist_albums(&spotify, &id).await {
-                    Ok(a) => {
-                        let _ = tx.send(AppEvent::ExplorerAlbumsLoaded(a));
-                    }
-                    Err(e) => {
-                        tracing::error!("fetch_artist_albums: {e:#}");
-                        let _ = tx.send(AppEvent::ExplorerAlbumsLoaded(vec![]));
-                    }
-                }
-            });
-        }
-
         _ => {
             *in_progress = false;
         }
@@ -287,7 +239,6 @@ fn nodes_equal(a: &ExplorerNode, b: &ExplorerNode) -> bool {
         (ExplorerNode::PlaylistTracks(id1, _, _), ExplorerNode::PlaylistTracks(id2, _, _)) => {
             id1 == id2
         }
-        (ExplorerNode::ArtistAlbums(id1, _), ExplorerNode::ArtistAlbums(id2, _)) => id1 == id2,
         (ExplorerNode::LikedTracks, ExplorerNode::LikedTracks) => true,
         _ => false,
     }
