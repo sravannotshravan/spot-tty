@@ -11,18 +11,13 @@ impl App {
         Self {
             state: AppState {
                 should_quit: false,
-
                 navigation: NavigationState { selected_index: 0 },
-
                 explorer_stack: vec![],
                 explorer_selected_index: 0,
-
                 key_mode: KeyMode::Normal,
                 focus: Focus::Sidebar,
-
                 pending_count: None,
-
-                // Animation initial state
+                user_name: None, // filled in after Spotify auth resolves
                 playback_progress: 0.0,
                 visualizer_phase: 0,
             },
