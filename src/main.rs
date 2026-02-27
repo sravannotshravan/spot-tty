@@ -163,31 +163,30 @@ async fn main() -> anyhow::Result<()> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn spawn_initial_fetches(spotify: AuthCodePkceSpotify, tx: mpsc::UnboundedSender<AppEvent>) {
-    // User profile
+    // User profile first — we need the user_id to correctly mark playlist ownership
     {
         let (sp, tx) = (spotify.clone(), tx.clone());
         tokio::spawn(async move {
             match svc::fetch_user(&sp).await {
                 Ok(user) => {
+                    let user_id = user.id.clone();
                     let _ = tx.send(AppEvent::UserLoaded(user.display_name));
-                }
-                Err(e) => {
-                    let _ = tx.send(AppEvent::LoadError(format!("Profile: {e}")));
-                }
-            }
-        });
-    }
 
-    // Playlists
-    {
-        let (sp, tx) = (spotify.clone(), tx.clone());
-        tokio::spawn(async move {
-            match svc::fetch_playlists(&sp).await {
-                Ok(pl) => {
-                    let _ = tx.send(AppEvent::PlaylistsLoaded(pl));
+                    // Fetch playlists now that we have the user_id
+                    match svc::fetch_playlists(&sp, &user_id).await {
+                        Ok(pl) => {
+                            let _ = tx.send(AppEvent::PlaylistsLoaded(pl));
+                        }
+                        Err(e) => {
+                            tracing::error!("fetch_playlists failed: {e:#}");
+                            let _ = tx.send(AppEvent::PlaylistsLoaded(vec![]));
+                        }
+                    }
                 }
                 Err(e) => {
-                    let _ = tx.send(AppEvent::LoadError(format!("Playlists: {e}")));
+                    tracing::error!("fetch_user failed: {e:#}");
+                    let _ = tx.send(AppEvent::LoadError(format!("Profile: {e}")));
+                    let _ = tx.send(AppEvent::PlaylistsLoaded(vec![]));
                 }
             }
         });
@@ -202,7 +201,8 @@ fn spawn_initial_fetches(spotify: AuthCodePkceSpotify, tx: mpsc::UnboundedSender
                     let _ = tx.send(AppEvent::LikedTracksLoaded(tracks));
                 }
                 Err(e) => {
-                    let _ = tx.send(AppEvent::LoadError(format!("Liked: {e}")));
+                    tracing::error!("fetch_liked_tracks failed: {e:#}");
+                    let _ = tx.send(AppEvent::LikedTracksLoaded(vec![]));
                 }
             }
         });
@@ -217,7 +217,8 @@ fn spawn_initial_fetches(spotify: AuthCodePkceSpotify, tx: mpsc::UnboundedSender
                     let _ = tx.send(AppEvent::ArtistsLoaded(artists));
                 }
                 Err(e) => {
-                    let _ = tx.send(AppEvent::LoadError(format!("Artists: {e}")));
+                    tracing::error!("fetch_followed_artists failed: {e:#}");
+                    let _ = tx.send(AppEvent::ArtistsLoaded(vec![]));
                 }
             }
         });

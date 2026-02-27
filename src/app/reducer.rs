@@ -11,23 +11,30 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
         // ── Data loaded from async tasks ──────────────────────────────────
         AppEvent::UserLoaded(name) => {
             state.user_name = Some(name);
+            state.loaded_user = true;
             check_ready(state);
         }
 
         AppEvent::PlaylistsLoaded(playlists) => {
             state.playlists = playlists;
-            // Seed the explorer for whatever is currently selected
+            state.loaded_playlists = true;
             update_sidebar_selection(state);
             check_ready(state);
         }
 
         AppEvent::LikedTracksLoaded(tracks) => {
             state.liked_tracks = tracks;
+            state.loaded_liked = true;
+            // If liked songs is currently selected, refresh explorer content
+            if let Some(ExplorerNode::LikedTracks) = state.explorer_stack.last() {
+                state.explorer_items = state.liked_tracks.clone();
+            }
             check_ready(state);
         }
 
         AppEvent::ArtistsLoaded(artists) => {
             state.artists = artists;
+            state.loaded_artists = true;
             check_ready(state);
         }
 
@@ -41,9 +48,12 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
             state.explorer_selected_index = 0;
         }
 
+        // Don't kill the whole app on a single load error — log it and keep going
         AppEvent::LoadError(msg) => {
+            tracing::error!("Load error: {}", msg);
             state.error_message = Some(msg);
-            state.status = AppStatus::Error;
+            // Still mark partial loads as done so the UI isn't stuck on Loading
+            check_ready(state);
         }
 
         // ── Navigation ────────────────────────────────────────────────────
@@ -77,7 +87,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
             state.key_mode = KeyMode::Normal;
         }
         AppEvent::JumpToArtists => {
-            state.navigation.selected_index = state.playlists.len() + 1; // 1 = Liked Songs row
+            state.navigation.selected_index = state.playlists.len() + 1;
             update_sidebar_selection(state);
             state.key_mode = KeyMode::Normal;
         }
@@ -134,9 +144,6 @@ fn max_index(state: &AppState) -> usize {
     }
 }
 
-/// Update the explorer stack & seed explorer content whenever the sidebar
-/// cursor moves.  Actual async fetching is triggered from main.rs by
-/// inspecting the new stack top.
 fn update_sidebar_selection(state: &mut AppState) {
     let idx = state.navigation.selected_index;
     state.explorer_selected_index = 0;
@@ -147,18 +154,14 @@ fn update_sidebar_selection(state: &mut AppState) {
     let pl_len = state.playlists.len();
 
     if idx < pl_len {
-        // A playlist row
         let pl = &state.playlists[idx];
         state
             .explorer_stack
             .push(ExplorerNode::PlaylistTracks(pl.id.clone(), pl.name.clone()));
     } else if idx == pl_len {
-        // Liked Songs row
         state.explorer_stack.push(ExplorerNode::LikedTracks);
-        // We already have liked tracks in state — expose them directly
         state.explorer_items = state.liked_tracks.clone();
     } else {
-        // An artist row
         let artist_idx = idx - pl_len - 1;
         if let Some(artist) = state.artists.get(artist_idx) {
             state.explorer_stack.push(ExplorerNode::ArtistAlbums(
@@ -170,15 +173,15 @@ fn update_sidebar_selection(state: &mut AppState) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Transition to Ready once all four initial payloads have arrived
+// Transition to Ready once all four fetches have settled (success or error)
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn check_ready(state: &mut AppState) {
     if state.status == AppStatus::Loading
-        && state.user_name.is_some()
-        && !state.playlists.is_empty()
-        && !state.liked_tracks.is_empty()
-        && !state.artists.is_empty()
+        && state.loaded_user
+        && state.loaded_playlists
+        && state.loaded_liked
+        && state.loaded_artists
     {
         state.status = AppStatus::Ready;
     }

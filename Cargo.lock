@@ -2100,6 +2100,7 @@ dependencies = [
  "moka",
  "open",
  "ratatui",
+ "reqwest",
  "rspotify",
  "serde",
  "serde_json",

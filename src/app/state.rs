@@ -51,7 +51,13 @@ pub struct AppState {
     pub status: AppStatus,
     pub should_quit: bool,
 
-    // ── User ─────────────────────────────────────────────────────────────
+    // ── Load tracking (true once each fetch settles, success or error) ────
+    pub loaded_user: bool,
+    pub loaded_playlists: bool,
+    pub loaded_liked: bool,
+    pub loaded_artists: bool,
+
+    // ── User profile ──────────────────────────────────────────────────────
     pub user_name: Option<String>,
 
     // ── Library data (populated after auth) ──────────────────────────────

@@ -12,6 +12,10 @@ impl App {
             state: AppState {
                 status: AppStatus::Loading,
                 should_quit: false,
+                loaded_user: false,
+                loaded_playlists: false,
+                loaded_liked: false,
+                loaded_artists: false,
                 user_name: None,
                 playlists: vec![],
                 liked_tracks: vec![],

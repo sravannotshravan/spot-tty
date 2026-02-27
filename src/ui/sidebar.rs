@@ -1,4 +1,4 @@
-use crate::app::state::{AppState, AppStatus, Focus};
+use crate::app::state::{AppState, Focus};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
@@ -37,13 +37,6 @@ pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) 
 
     render_user_box(frame, outer[0], state);
 
-    // If still loading, show a single spinner box instead of empty lists
-    if state.status == AppStatus::Loading {
-        render_loading(frame, outer[1]);
-        return;
-    }
-
-    // The three library sections share the remaining height
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -107,13 +100,6 @@ fn render_user_box(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppSt
                 .border_style(Style::default().fg(Color::Rgb(88, 91, 112))),
         );
 
-    frame.render_widget(paragraph, area);
-}
-
-fn render_loading(frame: &mut Frame, area: ratatui::layout::Rect) {
-    let paragraph = Paragraph::new(" Loading library…")
-        .style(Style::default().fg(Color::Rgb(120, 120, 130)))
-        .block(Block::default().borders(Borders::ALL));
     frame.render_widget(paragraph, area);
 }
 
