@@ -1,5 +1,5 @@
 use crate::app::state::{AppState, ExplorerNode, Focus};
-use crate::ui::cover::{render_placeholder, RenderCache};
+use crate::ui::cover::{render_placeholder, write_image_sentinel, RenderCache};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -55,6 +55,40 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut Rende
             }
         }
     }
+}
+
+/// Returns the set of image URLs currently visible in the explorer.
+/// Called by main.rs each frame to lazily spawn cover fetches.
+pub fn visible_cover_urls(state: &AppState, area: Rect) -> Vec<String> {
+    if state.explorer_items.is_empty() {
+        return vec![];
+    }
+
+    // Approximate inner area (subtract borders)
+    let inner_h = area.height.saturating_sub(2);
+    let vis = (inner_h.saturating_sub(1) / ROW_COVER_H) as usize;
+    let sel = state.explorer_selected_index;
+    let scroll = sel.saturating_sub(vis.saturating_sub(1));
+
+    let mut urls: Vec<String> = state
+        .explorer_items
+        .iter()
+        .skip(scroll)
+        .take(vis + 2) // +2 to prefetch just ahead
+        .filter_map(|t| t.album_image_url.clone())
+        .collect();
+
+    // Always include selected track's URL (for detail panel), highest priority
+    if let Some(url) = state
+        .explorer_items
+        .get(sel)
+        .and_then(|t| t.album_image_url.as_ref())
+    {
+        if !urls.contains(url) {
+            urls.insert(0, url.clone());
+        }
+    }
+    urls
 }
 
 fn render_split(
@@ -170,7 +204,10 @@ fn render_row_covers(frame: &mut Frame, area: Rect, state: &AppState, cache: &mu
             .as_ref()
             .and_then(|u| state.cover_cache.get(u))
         {
-            Some(img) => img.render(frame, rect, protocol, cache),
+            Some(img) => {
+                write_image_sentinel(frame, rect);
+                img.render(frame, rect, protocol, cache);
+            }
             None => render_placeholder(frame, rect),
         }
     }
@@ -204,15 +241,22 @@ fn render_detail(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut Re
         height: cover_h,
     };
 
-    match track
+    // Detail cover: only render once scroll has settled to avoid glitch mid-scroll
+    let cover_ready = track
         .album_image_url
         .as_ref()
-        .and_then(|u| state.cover_cache.get(u))
-    {
-        Some(img) => img.render(frame, cover_rect, protocol, cache),
-        None => render_placeholder(frame, cover_rect),
+        .and_then(|u| state.cover_cache.get(u));
+
+    // Show cover only when scroll has settled — avoids glitch during fast scrolling.
+    // If the image isn't loaded yet, placeholder stays until it arrives.
+    if let (Some(img), true) = (cover_ready, state.scroll_settled()) {
+        write_image_sentinel(frame, cover_rect);
+        img.render(frame, cover_rect, protocol, cache);
+    } else {
+        render_placeholder(frame, cover_rect);
     }
 
+    // Metadata always shows immediately — no debounce needed for text
     let meta = rows[1];
     if meta.height == 0 {
         return;

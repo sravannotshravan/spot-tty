@@ -2,6 +2,7 @@ use super::{
     events::AppEvent,
     state::{AppState, AppStatus, ExplorerNode, Focus, KeyMode},
 };
+use std::time::Instant;
 
 pub fn reduce(state: &mut AppState, event: AppEvent) {
     match event {
@@ -32,6 +33,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
             state.explorer_fetch_pending = false;
         }
         AppEvent::CoverLoaded(url, img) => {
+            state.cover_fetching.remove(&url);
             state.cover_cache.insert(url, img);
         }
         AppEvent::LoadError(msg) => {
@@ -39,16 +41,27 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
             state.error_message = Some(msg);
             check_ready(state);
         }
-        AppEvent::MoveDown(n) => move_cursor(state, n as isize),
-        AppEvent::MoveUp(n) => move_cursor(state, -(n as isize)),
-        AppEvent::GoTop => set_cursor(state, 0),
+        AppEvent::MoveDown(n) => {
+            move_cursor(state, n as isize);
+            state.last_nav_move = Some(Instant::now());
+        }
+        AppEvent::MoveUp(n) => {
+            move_cursor(state, -(n as isize));
+            state.last_nav_move = Some(Instant::now());
+        }
+        AppEvent::GoTop => {
+            set_cursor(state, 0);
+            state.last_nav_move = Some(Instant::now());
+        }
         AppEvent::GoBottom => {
             let m = max_index(state);
             set_cursor(state, m);
+            state.last_nav_move = Some(Instant::now());
         }
         AppEvent::GoMiddle => {
             let m = max_index(state);
             set_cursor(state, m / 2);
+            state.last_nav_move = Some(Instant::now());
         }
         AppEvent::Enter => {
             state.focus = Focus::Explorer;
@@ -60,11 +73,13 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
             state.navigation.selected_index = 0;
             update_sidebar_selection(state);
             state.key_mode = KeyMode::Normal;
+            state.last_nav_move = Some(Instant::now());
         }
         AppEvent::JumpToLiked => {
             state.navigation.selected_index = state.playlists.len();
             update_sidebar_selection(state);
             state.key_mode = KeyMode::Normal;
+            state.last_nav_move = Some(Instant::now());
         }
     }
 }

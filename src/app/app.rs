@@ -2,7 +2,8 @@ use super::events::AppEvent;
 use super::reducer::reduce;
 use super::state::{AppState, AppStatus, Focus, KeyMode, NavigationState};
 use crate::ui::cover::{detect_protocol, RenderCache};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 pub struct App {
     pub state: AppState,
@@ -27,6 +28,7 @@ impl App {
                 liked_tracks: vec![],
                 explorer_items: vec![],
                 cover_cache: HashMap::new(),
+                cover_fetching: HashSet::new(),
                 navigation: NavigationState { selected_index: 0 },
                 explorer_stack: vec![],
                 explorer_selected_index: 0,
@@ -36,6 +38,7 @@ impl App {
                 error_message: None,
                 playback_progress: 0.3,
                 visualizer_phase: 0,
+                last_nav_move: None,
             },
         }
     }

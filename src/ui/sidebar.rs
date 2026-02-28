@@ -1,5 +1,5 @@
 use crate::app::state::{AppState, Focus};
-use crate::ui::cover::{render_placeholder, RenderCache};
+use crate::ui::cover::{render_placeholder, write_image_sentinel, RenderCache};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -98,7 +98,12 @@ fn render_playlists(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut
             height: COVER_H,
         };
         match pl.image_url.as_ref().and_then(|u| state.cover_cache.get(u)) {
-            Some(img) => img.render(frame, cover_rect, protocol, cache),
+            Some(img) => {
+                // Write stable sentinel cells so ratatui's diff never repaints
+                // these cells as blank, eliminating flicker.
+                write_image_sentinel(frame, cover_rect);
+                img.render(frame, cover_rect, protocol, cache);
+            }
             None => render_placeholder(frame, cover_rect),
         }
 

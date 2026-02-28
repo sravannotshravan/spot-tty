@@ -5,7 +5,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use rspotify::AuthCodePkceSpotify;
-use std::{collections::HashSet, io, time::Instant};
+use std::{io, time::Instant};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
@@ -64,47 +64,75 @@ async fn main() -> anyhow::Result<()> {
             app.state.visualizer_phase = (app.state.visualizer_phase + 1) % 1000;
         }
 
-        app.state.render_cache.begin_frame();
+        // ── Lazy cover fetching ───────────────────────────────────────────────
+        // Each frame: collect URLs visible on screen right now, fetch only what's
+        // missing and not already in-flight. This limits concurrent fetches and
+        // avoids hammering 200 URLs at startup.
+        {
+            let size = terminal.size().unwrap_or_default();
+            let areas = ui::layout::split(size);
 
+            // Sidebar: visible playlist image URLs
+            let sidebar_urls: Vec<String> = {
+                let sel = app.state.navigation.selected_index;
+                let h = areas.sidebar.height.saturating_sub(8); // minus borders/header/liked
+                let vis = (h / 4) as usize; // COVER_H = 4
+                let scroll = sel.saturating_sub(vis.saturating_sub(1));
+                app.state
+                    .playlists
+                    .iter()
+                    .skip(scroll)
+                    .take(vis + 2)
+                    .filter_map(|p| p.image_url.clone())
+                    .collect()
+            };
+
+            // Explorer: visible track URLs
+            let explorer_urls = ui::explorer::visible_cover_urls(&app.state, areas.main);
+
+            // Merge: selected track first (highest priority), then visible rows
+            let mut all_urls: Vec<String> = explorer_urls;
+            for u in sidebar_urls {
+                if !all_urls.contains(&u) {
+                    all_urls.push(u);
+                }
+            }
+
+            for url in all_urls {
+                if !app.state.cover_cache.contains_key(&url)
+                    && !app.state.cover_fetching.contains(&url)
+                {
+                    app.state.cover_fetching.insert(url.clone());
+                    let tx2 = tx.clone();
+                    tokio::spawn(async move {
+                        if let Some(img) = ui::cover::fetch_cover(&url).await {
+                            let _ = tx2.send(AppEvent::CoverLoaded(url, img));
+                        }
+                    });
+                }
+            }
+        }
+
+        // ── Render ────────────────────────────────────────────────────────────
+        app.state.render_cache.begin_frame();
         let cache_ptr = &mut app.state.render_cache as *mut _;
         terminal.draw(|f| {
-            // SAFETY: render_cache is only accessed here; AppState is read-only during draw.
+            // SAFETY: render_cache not aliased; AppState fields are read-only here.
             let cache = unsafe { &mut *cache_ptr };
             let areas = ui::layout::split(f.size());
             ui::sidebar::render(f, areas.sidebar, &app.state, cache);
             ui::explorer::render(f, areas.main, &app.state, cache);
             ui::player::render(f, areas.control, &app.state);
         })?;
-
-        // Flush all queued image escape sequences in one write
+        // One stdout write for all queued Kitty/iTerm2 sequences
         app.state.render_cache.flush();
 
+        // ── Events ────────────────────────────────────────────────────────────
         while let Ok(ev) = rx.try_recv() {
             match &ev {
-                AppEvent::ExplorerTracksLoaded(tracks) => {
+                // On track load: do NOT bulk-spawn covers — lazy loop above handles it
+                AppEvent::ExplorerTracksLoaded(_) => {
                     fetch_in_progress = false;
-                    spawn_cover_fetches(
-                        tracks
-                            .iter()
-                            .filter_map(|t| t.album_image_url.clone())
-                            .collect(),
-                        tx.clone(),
-                    );
-                }
-                AppEvent::LikedTracksLoaded(tracks) => {
-                    spawn_cover_fetches(
-                        tracks
-                            .iter()
-                            .filter_map(|t| t.album_image_url.clone())
-                            .collect(),
-                        tx.clone(),
-                    );
-                }
-                AppEvent::PlaylistsLoaded(pl) => {
-                    spawn_cover_fetches(
-                        pl.iter().filter_map(|p| p.image_url.clone()).collect(),
-                        tx.clone(),
-                    );
                 }
                 AppEvent::LoadError(_) => {
                     fetch_in_progress = false;
@@ -125,6 +153,7 @@ async fn main() -> anyhow::Result<()> {
             tx.clone(),
         );
 
+        // ── Input ─────────────────────────────────────────────────────────────
         if event::poll(Duration::from_millis(10))? {
             if let Event::Key(key) = event::read()? {
                 if let KeyCode::Char(c) = key.code {
@@ -214,20 +243,6 @@ fn spawn_initial_fetches(spotify: AuthCodePkceSpotify, tx: mpsc::UnboundedSender
                 }
             }
         });
-    }
-}
-
-fn spawn_cover_fetches(urls: Vec<String>, tx: mpsc::UnboundedSender<AppEvent>) {
-    let mut seen: HashSet<String> = HashSet::new();
-    for url in urls {
-        if seen.insert(url.clone()) {
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                if let Some(img) = ui::cover::fetch_cover(&url).await {
-                    let _ = tx.send(AppEvent::CoverLoaded(url, img));
-                }
-            });
-        }
     }
 }
 

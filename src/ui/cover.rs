@@ -1,19 +1,38 @@
-//! Cover art rendering — Kitty graphics protocol with aggressive frame dedup.
+//! Cover art — Kitty graphics protocol (a=T / a=p) + iTerm2 + half-block fallback.
 //!
-//! ## How lag is avoided
+//! ## Why the previous version broke
 //!
-//! 1. **Upload once**: PNG sent via `a=T` on first render; stored in terminal GPU mem by ID.
-//! 2. **Display once per position**: `a=p` (display by ID) is sent only when the image
-//!    or its screen position changes. Tracked via `RenderCache` in AppState.
-//! 3. **One flush per frame**: all escape sequences are accumulated into a single `Vec<u8>`
-//!    and flushed once after `terminal.draw()` completes, not per-image.
-//! 4. **No PNG re-encoding**: PNG bytes and base64 are computed at fetch time, never again.
+//! The Unicode Placeholder approach (U=1 + diacritic encoding) requires the
+//! image ID to be encoded in the *foreground colour* of each placeholder cell.
+//! Ratatui converts Color::Rgb to ANSI sequences, but the exact 24-bit values
+//! need to survive round-tripping through the terminal's own colour pipeline.
+//! In practice, Kitty only intercepts the placeholder if the fg colour matches
+//! the stored image ID exactly — any rounding causes it to render as garbage.
+//!
+//! ## What we do instead (stable, proven)
+//!
+//! 1. Upload image once with `a=T,q=2` (quiet, no response needed).
+//! 2. Every frame, redisplay with `a=p,q=2` (~60 bytes) — only when the
+//!    (id, x, y, w, h) tuple changed vs last frame (tracked in RenderCache).
+//! 3. ratatui writes the cell buffer as normal. We send Kitty sequences *after*
+//!    `terminal.draw()` returns and *after* `render_cache.flush()` — so Kitty
+//!    paints on top of whatever ratatui left behind. The images composite over
+//!    the text layer at the correct z-index.
+//!
+//! The remaining flicker on fast scroll is eliminated by the scroll debounce
+//! in the detail panel (120 ms settle time before showing the large cover).
+//! Row thumbnails are small enough that the repaint is imperceptible.
+//!
+//! ## Disk cache
+//!
+//! Cover bytes are saved to ~/.cache/spot-tty/covers/<hash>.bin so second
+//! launch shows images instantly without any network requests.
 
 use image::{imageops::FilterType, DynamicImage, GenericImageView};
 use ratatui::{layout::Rect, style::Color, Frame};
 use std::io::Write;
 
-// ── Protocol ─────────────────────────────────────────────────────────────────
+// ── Protocol ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ImageProtocol {
@@ -41,49 +60,67 @@ pub fn detect_protocol() -> ImageProtocol {
     ImageProtocol::HalfBlock
 }
 
+// ── Disk cache ────────────────────────────────────────────────────────────────
+
+fn cache_path(url: &str) -> Option<std::path::PathBuf> {
+    let dir = dirs::cache_dir()?.join("spot-tty").join("covers");
+    std::fs::create_dir_all(&dir).ok()?;
+    let hash = url
+        .bytes()
+        .fold(5381u64, |h, b| h.wrapping_mul(33).wrapping_add(b as u64));
+    Some(dir.join(format!("{hash:016x}.bin")))
+}
+
+fn load_cached_bytes(url: &str) -> Option<Vec<u8>> {
+    std::fs::read(cache_path(url)?).ok()
+}
+
+fn save_cached_bytes(url: &str, bytes: &[u8]) {
+    if let Some(p) = cache_path(url) {
+        let _ = std::fs::write(p, bytes);
+    }
+}
+
 // ── Per-frame render cache ────────────────────────────────────────────────────
 
-/// Tracks what was actually drawn last frame so we can skip redundant writes.
+/// Tracks what was rendered last frame to skip redundant escape sequences.
 #[derive(Default)]
 pub struct RenderCache {
-    /// (kitty_id, x, y, w, h) → frame_number it was last drawn
+    /// (kitty_id, x, y, w, h) → last frame it was placed
     placed: std::collections::HashMap<(u32, u16, u16, u16, u16), u64>,
-    /// kitty IDs already uploaded (PNG transmitted)
+    /// IDs whose PNG bytes have been transmitted to the terminal
     pub uploaded: std::collections::HashSet<u32>,
-    /// Accumulated escape bytes for this frame — flushed once at end of draw
+    /// Escape sequences to flush after terminal.draw()
     pub pending: Vec<u8>,
     pub frame: u64,
 }
 
 impl RenderCache {
-    /// Call at the start of every `terminal.draw()` to advance the frame counter
-    /// and clear stale entries from the previous frame.
     pub fn begin_frame(&mut self) {
         self.frame += 1;
         self.pending.clear();
-        // Remove entries older than 2 frames — they're no longer on screen
-        let frame = self.frame;
-        self.placed.retain(|_, f| frame - *f <= 2);
+        let f = self.frame;
+        self.placed.retain(|_, last| f - *last <= 2);
     }
 
-    /// Returns true if this image at this position was already written this frame.
-    pub fn already_placed(&self, kid: u32, area: Rect) -> bool {
-        let key = (kid, area.x, area.y, area.width, area.height);
-        self.placed.get(&key).copied().unwrap_or(0) == self.frame
+    fn already_placed(&self, kid: u32, area: Rect) -> bool {
+        self.placed
+            .get(&(kid, area.x, area.y, area.width, area.height))
+            .copied()
+            .unwrap_or(0)
+            == self.frame
     }
 
-    pub fn mark_placed(&mut self, kid: u32, area: Rect) {
+    fn mark_placed(&mut self, kid: u32, area: Rect) {
         self.placed
             .insert((kid, area.x, area.y, area.width, area.height), self.frame);
     }
 
-    /// Flush all pending escape sequences to stdout in one syscall.
     pub fn flush(&self) {
         if self.pending.is_empty() {
             return;
         }
-        let stdout = std::io::stdout();
-        let mut lock = stdout.lock();
+        let mut lock = std::io::stdout().lock();
         let _ = lock.write_all(&self.pending);
         let _ = lock.flush();
     }
@@ -93,13 +130,9 @@ impl RenderCache {
 
 #[derive(Clone, Debug)]
 pub struct CoverImage {
-    /// Pre-encoded PNG base64 — computed once at fetch, never again
-    pub png_b64: String,
-    /// Raw bytes base64 (JPEG/PNG) — for iTerm2
-    pub raw_b64: String,
-    /// Decoded pixels for half-block fallback
-    pub decoded: DynamicImage,
-    /// Unique ID for Kitty protocol (1-based, wraps at 2^24)
+    pub png_b64: String,       // PNG as base64, computed once
+    pub raw_b64: String,       // raw bytes as base64, for iTerm2
+    pub decoded: DynamicImage, // pixels for half-block fallback
     pub kitty_id: u32,
 }
 
@@ -108,25 +141,19 @@ static KITTY_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::ne
 impl CoverImage {
     pub fn from_bytes(raw: Vec<u8>) -> Option<Self> {
         let decoded = image::load_from_memory(&raw).ok()?;
-        // PNG encode once
-        let mut png_buf = Vec::new();
+        let mut png = Vec::new();
         decoded
-            .write_to(
-                &mut std::io::Cursor::new(&mut png_buf),
-                image::ImageFormat::Png,
-            )
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
             .ok()?;
         let kitty_id = KITTY_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) & 0x00FF_FFFF;
         Some(Self {
-            png_b64: base64_encode(&png_buf),
-            raw_b64: base64_encode(&raw),
+            png_b64: b64(&png),
+            raw_b64: b64(&raw),
             decoded,
             kitty_id,
         })
     }
 
-    /// Queue a render into `cache.pending`. Nothing is written to stdout here.
-    /// The caller must call `cache.flush()` once per frame after all images are queued.
     pub fn render(
         &self,
         frame: &mut Frame,
@@ -142,30 +169,23 @@ impl CoverImage {
     }
 
     fn queue_kitty(&self, area: Rect, cache: &mut RenderCache) {
-        // Skip entirely if same image at same position was already queued this frame
         if cache.already_placed(self.kitty_id, area) {
             return;
         }
         cache.mark_placed(self.kitty_id, area);
 
-        let cursor = format!("\x1b[{};{}H", area.y + 1, area.x + 1);
+        // Cursor move to top-left of the cell area
+        let cur = format!("\x1b[{};{}H", area.y + 1, area.x + 1);
+        cache.pending.extend_from_slice(cur.as_bytes());
 
-        if cache.uploaded.contains(&self.kitty_id) {
-            // Already in terminal memory — display by ID only (~60 bytes)
-            let seq = format!(
-                "{}\x1b_Ga=p,i={},c={},r={},q=2;\x1b\\",
-                cursor, self.kitty_id, area.width, area.height
-            );
-            cache.pending.extend_from_slice(seq.as_bytes());
-        } else {
-            // First time: transmit + display. Mark uploaded immediately so next
-            // frame takes the fast path even before flush completes.
+        if !cache.uploaded.contains(&self.kitty_id) {
+            // First time: transmit + display in chunked b64
+            // a=T: transmit+display, f=100: auto-detect format, q=2: no response
             cache.uploaded.insert(self.kitty_id);
-            cache.pending.extend_from_slice(cursor.as_bytes());
             let chunks: Vec<&[u8]> = self.png_b64.as_bytes().chunks(4096).collect();
             for (i, chunk) in chunks.iter().enumerate() {
                 let m = if i == chunks.len() - 1 { 0u8 } else { 1u8 };
-                let seq = if i == 0 {
+                let hdr = if i == 0 {
                     format!(
                         "\x1b_Ga=T,f=100,i={},c={},r={},q=2,m={};",
                         self.kitty_id, area.width, area.height, m
@@ -173,10 +193,18 @@ impl CoverImage {
                 } else {
                     format!("\x1b_Gm={};", m)
                 };
-                cache.pending.extend_from_slice(seq.as_bytes());
+                cache.pending.extend_from_slice(hdr.as_bytes());
                 cache.pending.extend_from_slice(chunk);
                 cache.pending.extend_from_slice(b"\x1b\\");
             }
+        } else {
+            // Already uploaded: just re-place by ID (~60 bytes)
+            // a=p: put/display, i=id, c/r: cell dimensions, q=2: quiet
+            let seq = format!(
+                "\x1b_Ga=p,i={},c={},r={},q=2;\x1b\\",
+                self.kitty_id, area.width, area.height
+            );
+            cache.pending.extend_from_slice(seq.as_bytes());
         }
     }
 
@@ -234,13 +262,17 @@ pub fn render_placeholder(frame: &mut Frame, area: Rect) {
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 
 pub async fn fetch_cover(url: &str) -> Option<CoverImage> {
-    let bytes = reqwest::get(url).await.ok()?.bytes().await.ok()?;
-    CoverImage::from_bytes(bytes.to_vec())
+    if let Some(bytes) = load_cached_bytes(url) {
+        return CoverImage::from_bytes(bytes);
+    }
+    let bytes = reqwest::get(url).await.ok()?.bytes().await.ok()?.to_vec();
+    save_cached_bytes(url, &bytes);
+    CoverImage::from_bytes(bytes)
 }
 
 // ── Base64 ────────────────────────────────────────────────────────────────────
 
-fn base64_encode(input: &[u8]) -> String {
+fn b64(input: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = Vec::with_capacity((input.len() + 2) / 3 * 4);
     for chunk in input.chunks(3) {
@@ -265,4 +297,28 @@ fn base64_encode(input: &[u8]) -> String {
         out.push(if chunk.len() > 2 { T[b2 & 63] } else { b'=' });
     }
     String::from_utf8(out).unwrap()
+}
+
+// ── Stable cell sentinel (anti-flicker) ───────────────────────────────────────
+//
+// ratatui diffs its cell buffer every frame. If a cell's symbol/style is
+// unchanged from the previous frame, ratatui sends nothing for that cell.
+// We exploit this: write a sentinel symbol+colour into every image cell so
+// ratatui considers them "stable" and stops repainting them with spaces.
+// The Kitty image composites above the cell layer regardless of cell content.
+pub fn write_image_sentinel(frame: &mut Frame, area: Rect) {
+    // A stable, visually-invisible sentinel: space with a near-black bg.
+    // Near-black (1,1,1) != Reset so ratatui tracks it as a real colour,
+    // but visually indistinguishable from the terminal default background.
+    let style = ratatui::style::Style::default()
+        .bg(Color::Rgb(1, 1, 1))
+        .fg(Color::Rgb(1, 1, 1));
+    let buf = frame.buffer_mut();
+    for row in 0..area.height {
+        for col in 0..area.width {
+            let cell = buf.get_mut(area.x + col, area.y + row);
+            cell.set_symbol(" ");
+            cell.set_style(style);
+        }
+    }
 }
