@@ -43,7 +43,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut Rende
                 inner,
             );
         }
-        Some(ExplorerNode::PlaylistTracks(_, _, true)) | Some(ExplorerNode::LikedTracks) => {
+        Some(_) => {
             if state.explorer_items.is_empty() {
                 frame.render_widget(
                     Paragraph::new("  Loading…")
@@ -57,14 +57,13 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut Rende
     }
 }
 
-/// Returns the set of image URLs currently visible in the explorer.
-/// Called by main.rs each frame to lazily spawn cover fetches.
+/// Returns URLs of covers visible on screen right now — used by main.rs for
+/// lazy fetching. Selected track's URL is always first (highest priority).
 pub fn visible_cover_urls(state: &AppState, area: Rect) -> Vec<String> {
     if state.explorer_items.is_empty() {
         return vec![];
     }
 
-    // Approximate inner area (subtract borders)
     let inner_h = area.height.saturating_sub(2);
     let vis = (inner_h.saturating_sub(1) / ROW_COVER_H) as usize;
     let sel = state.explorer_selected_index;
@@ -74,11 +73,11 @@ pub fn visible_cover_urls(state: &AppState, area: Rect) -> Vec<String> {
         .explorer_items
         .iter()
         .skip(scroll)
-        .take(vis + 2) // +2 to prefetch just ahead
+        .take(vis + 2)
         .filter_map(|t| t.album_image_url.clone())
         .collect();
 
-    // Always include selected track's URL (for detail panel), highest priority
+    // Selected track first — needed for detail panel
     if let Some(url) = state
         .explorer_items
         .get(sel)
@@ -98,21 +97,38 @@ fn render_split(
     is_active: bool,
     cache: &mut RenderCache,
 ) {
-    let layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(ROW_COVER_W + 1),
-            Constraint::Min(0),
-            Constraint::Length(DETAIL_PANEL_W),
-        ])
-        .split(area);
+    let is_compact = area.width < 120;
 
-    render_table(frame, layout[1], state, is_active);
-    render_row_covers(frame, layout[0], state, cache);
-    render_detail(frame, layout[2], state, cache);
+    if !is_compact {
+        // Wide: [row covers | table | detail panel]
+        let layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(ROW_COVER_W + 1),
+                Constraint::Min(0),
+                Constraint::Length(DETAIL_PANEL_W),
+            ])
+            .split(area);
+
+        render_table(frame, layout[1], state, is_active);
+        render_row_covers(frame, layout[0], state, cache);
+        render_detail(frame, layout[2], state, cache, false);
+    } else {
+        // Compact: [table / detail stacked]
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(6), Constraint::Length(10)])
+            .split(area);
+
+        render_table(frame, layout[0], state, is_active);
+        render_detail(frame, layout[1], state, cache, true);
+    }
 }
 
 fn render_table(frame: &mut Frame, area: Rect, state: &AppState, is_active: bool) {
+    let sel = state.explorer_selected_index;
+    let items = &state.explorer_items;
+
     let hdr = Row::new(vec![
         Cell::from(" #"),
         Cell::from("Title"),
@@ -129,6 +145,7 @@ fn render_table(frame: &mut Frame, area: Rect, state: &AppState, is_active: bool
 
     let fixed: u16 = 5 + 22 + 22 + 5 + 4;
     let title_w: u16 = area.width.saturating_sub(fixed).max(10);
+
     let widths = [
         Constraint::Length(5),
         Constraint::Length(title_w),
@@ -136,9 +153,6 @@ fn render_table(frame: &mut Frame, area: Rect, state: &AppState, is_active: bool
         Constraint::Length(22),
         Constraint::Length(5),
     ];
-
-    let sel = state.explorer_selected_index;
-    let items = &state.explorer_items;
 
     let rows: Vec<Row> = items
         .iter()
@@ -213,7 +227,13 @@ fn render_row_covers(frame: &mut Frame, area: Rect, state: &AppState, cache: &mu
     }
 }
 
-fn render_detail(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut RenderCache) {
+fn render_detail(
+    frame: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    cache: &mut RenderCache,
+    compact: bool,
+) {
     let block = Block::default()
         .borders(Borders::LEFT)
         .border_style(Style::default().fg(Color::Rgb(50, 55, 70)));
@@ -226,29 +246,31 @@ fn render_detail(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut Re
     };
     let protocol = state.image_protocol;
 
-    let cover_h = DETAIL_COVER_H.min(inner.height);
+    let cover_h = if compact { 5u16 } else { DETAIL_COVER_H };
+    let cover_h = cover_h.min(inner.height);
+    let cover_w = if compact {
+        inner.width.min(20)
+    } else {
+        DETAIL_COVER_W.min(inner.width)
+    };
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(cover_h), Constraint::Min(0)])
         .split(inner);
 
-    let cw = DETAIL_COVER_W.min(inner.width);
-    let cx = inner.x + (inner.width.saturating_sub(cw)) / 2;
     let cover_rect = Rect {
-        x: cx,
+        x: inner.x,
         y: rows[0].y,
-        width: cw,
+        width: cover_w,
         height: cover_h,
     };
 
-    // Detail cover: only render once scroll has settled to avoid glitch mid-scroll
+    // Scroll debounce: only render large cover once scrolling has settled (120 ms)
     let cover_ready = track
         .album_image_url
         .as_ref()
         .and_then(|u| state.cover_cache.get(u));
-
-    // Show cover only when scroll has settled — avoids glitch during fast scrolling.
-    // If the image isn't loaded yet, placeholder stays until it arrives.
     if let (Some(img), true) = (cover_ready, state.scroll_settled()) {
         write_image_sentinel(frame, cover_rect);
         img.render(frame, cover_rect, protocol, cache);
@@ -256,7 +278,7 @@ fn render_detail(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut Re
         render_placeholder(frame, cover_rect);
     }
 
-    // Metadata always shows immediately — no debounce needed for text
+    // Metadata — always shows immediately, no debounce
     let meta = rows[1];
     if meta.height == 0 {
         return;
