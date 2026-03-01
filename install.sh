@@ -22,7 +22,7 @@ error() {
 }
 header() { echo -e "\n${BOLD}$*${RESET}"; }
 
-REPO="https://github.com/YOUR_USERNAME/spot-tty"
+REPO="https://github.com/Gaurav-Gali/spot-tty"
 INSTALL_DIR="$HOME/.local/bin"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/spot-tty"
 NVIM_PLUGIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/plugins/spot-tty.nvim"
