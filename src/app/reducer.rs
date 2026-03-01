@@ -15,17 +15,20 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
         }
         AppEvent::UserProfileLoaded(profile) => {
             state.user_profile = Some(profile);
+            recompute_stats(state);
         }
         AppEvent::PlaylistsLoaded(pl) => {
             state.playlists = pl;
             state.loaded_playlists = true;
             update_sidebar_selection(state);
             check_ready(state);
+            recompute_stats(state);
         }
         AppEvent::LikedTracksLoaded(tracks) => {
             state.merge_tracks(&tracks.clone());
             state.liked_tracks = tracks;
             state.loaded_liked = true;
+            recompute_stats(state);
             if matches!(state.explorer_stack.last(), Some(ExplorerNode::LikedTracks)) {
                 state.explorer_items = state.liked_tracks.clone();
                 state.explorer_fetch_pending = false;
@@ -37,6 +40,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
             state.explorer_items = tracks;
             state.explorer_selected_index = 0;
             state.explorer_fetch_pending = false;
+            recompute_stats(state);
         }
         AppEvent::CoverLoaded(url, img) => {
             state.cover_fetching.remove(&url);
@@ -178,8 +182,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
             // Delete cached token — next launch will trigger fresh OAuth
             let path = crate::services::auth::token_cache_path();
             let _ = std::fs::remove_file(&path);
-            state.show_toast("Logged out — restart to sign in again".to_string());
-            state.key_mode = crate::app::state::KeyMode::Normal;
+            state.should_quit = true;
         }
 
         // ── Toast ─────────────────────────────────────────────────────────────
@@ -290,4 +293,12 @@ fn check_ready(state: &mut AppState) {
     {
         state.status = AppStatus::Ready;
     }
+}
+
+fn recompute_stats(state: &mut AppState) {
+    state.cached_stats = crate::services::spotify::compute_stats(
+        state.user_profile.as_ref().unwrap_or(&Default::default()),
+        &state.playlists,
+        &state.liked_tracks,
+    );
 }

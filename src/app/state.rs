@@ -1,5 +1,6 @@
-use crate::services::spotify::UserProfile;
-use crate::services::spotify::{Device, PlaybackState, PlaylistSummary, TrackSummary};
+use crate::services::spotify::{
+    Device, PlaybackState, PlaylistSummary, TrackSummary, UserProfile, UserStats,
+};
 use crate::ui::cover::{CoverImage, ImageProtocol, RenderCache};
 use crate::ui::profile::ProfileState;
 use crate::ui::search::SearchState;
@@ -79,6 +80,7 @@ pub struct AppState {
     pub track_menu: TrackMenuState,
     pub profile: ProfileState,
     pub user_profile: Option<UserProfile>,
+    pub cached_stats: UserStats, // recomputed on data change, not every frame
 
     /// Flat list of all tracks across liked + all loaded playlists — for search
     pub all_tracks: Vec<TrackSummary>,

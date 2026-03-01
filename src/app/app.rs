@@ -47,6 +47,7 @@ impl App {
                 track_menu: TrackMenuState::default(),
                 profile: ProfileState::default(),
                 user_profile: None,
+                cached_stats: Default::default(),
                 all_tracks: vec![],
                 toast: None,
             },

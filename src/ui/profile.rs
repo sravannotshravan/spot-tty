@@ -3,7 +3,6 @@
 //! Layout: left nav (22 cols) │ right content panel
 
 use crate::app::state::AppState;
-use crate::services::spotify::compute_stats;
 use crate::ui::search::centered_rect;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -77,7 +76,7 @@ const FG: Color = Color::Rgb(205, 214, 244);
 const SUBTEXT: Color = Color::Rgb(108, 112, 134);
 const OVERLAY: Color = Color::Rgb(49, 50, 68);
 const SEL_BG: Color = Color::Rgb(40, 44, 60);
-const BASE: Color = Color::Rgb(18, 18, 28); // true dark background
+const BASE: Color = Color::Reset; // matches app background
 
 // ── Top-level render ──────────────────────────────────────────────────────────
 
@@ -94,7 +93,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(OVERLAY))
+        .border_style(Style::default().fg(ACCENT))
         .style(Style::default().bg(BASE));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
@@ -113,7 +112,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     for row in 0..div_col.height {
         let cell = frame.buffer_mut().get_mut(div_col.x, div_col.y + row);
         cell.set_symbol("│");
-        cell.set_fg(OVERLAY);
+        cell.set_fg(ACCENT);
         cell.set_bg(BASE);
     }
 
@@ -222,7 +221,7 @@ fn render_profile(frame: &mut Frame, area: Rect, state: &AppState) {
                 Span::styled(
                     format!(" {} ", initial),
                     Style::default()
-                        .fg(BASE)
+                        .fg(Color::Rgb(20, 20, 30))
                         .bg(ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ),
@@ -255,11 +254,6 @@ fn render_profile(frame: &mut Frame, area: Rect, state: &AppState) {
         lines.push(Line::from(""));
 
         // ── Quick stats ───────────────────────────────────────────────────────
-        lines.push(Line::from(Span::styled(
-            "Library",
-            Style::default().fg(SUBTEXT),
-        )));
-        lines.push(Line::from(""));
         lines.push(fstat("Playlists", state.playlists.len().to_string()));
         lines.push(fstat("Liked songs", state.liked_tracks.len().to_string()));
 
@@ -323,11 +317,7 @@ fn render_profile(frame: &mut Frame, area: Rect, state: &AppState) {
 fn render_stats(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(Block::default().style(Style::default().bg(BASE)), area);
 
-    let stats = compute_stats(
-        state.user_profile.as_ref().unwrap_or(&Default::default()),
-        &state.playlists,
-        &state.liked_tracks,
-    );
+    let stats = &state.cached_stats;
 
     let cols = Layout::default()
         .direction(Direction::Horizontal)
