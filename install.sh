@@ -31,8 +31,8 @@ NVIM_LAZY_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/lua/plugins"
 echo -e "${BOLD}"
 echo "  ███████╗██████╗  ██████╗ ████████╗    ████████╗████████╗██╗   ██╗"
 echo "  ██╔════╝██╔══██╗██╔═══██╗╚══██╔══╝       ██╔══╝╚══██╔══╝╚██╗ ██╔╝"
-echo "  ███████╗██████╔╝██║   ██║   ██║    █████╗██║      ██║    ╚████╔╝ "
-echo "  ╚════██║██╔═══╝ ██║   ██║   ██║    ╚════╝██║      ██║     ╚██╔╝  "
+echo "  ███████╗██████╔╝██║   ██║   ██║   █████╗ ██║      ██║    ╚████╔╝ "
+echo "  ╚════██║██╔═══╝ ██║   ██║   ██║   ╚════╝ ██║      ██║     ╚██╔╝  "
 echo "  ███████║██║     ╚██████╔╝   ██║          ██║      ██║      ██║   "
 echo "  ╚══════╝╚═╝      ╚═════╝    ╚═╝          ╚═╝      ╚═╝      ╚═╝   "
 echo -e "${RESET}"
@@ -75,7 +75,7 @@ fi
 # ── 4. Build ──────────────────────────────────────────────────────────────────
 header "Building spot-tty (this takes ~1 min on first run)..."
 cd "$TMP_DIR/spot-tty"
-cargo build --release --quiet
+cargo build --release
 success "Build complete"
 
 # ── 5. Install binary ─────────────────────────────────────────────────────────
@@ -116,8 +116,8 @@ else
   echo -e "    ${CYAN}4.${RESET} Copy your Client ID and Client Secret"
   echo ""
 
-  read -rp "  Client ID:     " CLIENT_ID
-  read -rp "  Client Secret: " CLIENT_SECRET
+  read -rp "  Client ID:     " CLIENT_ID </dev/tty
+  read -rp "  Client Secret: " CLIENT_SECRET </dev/tty
 
   if [[ -z "$CLIENT_ID" || -z "$CLIENT_SECRET" ]]; then
     error "Client ID and Secret cannot be empty"
@@ -137,7 +137,7 @@ echo ""
 
 INSTALL_NVIM=false
 if command -v nvim &>/dev/null; then
-  read -rp "  Neovim detected — install spot-tty.nvim plugin? [Y/n] " REPLY
+  read -rp "  Neovim detected — install spot-tty.nvim plugin? [Y/n] " REPLY </dev/tty
   REPLY="${REPLY:-Y}"
   [[ "$REPLY" =~ ^[Yy]$ ]] && INSTALL_NVIM=true
 else
