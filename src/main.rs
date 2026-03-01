@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     let mut app = App::new();
     spawn_initial_fetches(spotify.clone(), tx.clone());
 
-    let tick_rate = Duration::from_millis(150);
+    let tick_rate = Duration::from_millis(33);
     let poll_rate = Duration::from_secs(2);
     let mut last_tick = Instant::now();
     let mut last_poll = Instant::now();
@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
             {
                 app.state.visualizer_phase = (app.state.visualizer_phase + 1) % 100_000;
                 if let Some(p) = &mut app.state.playback {
-                    p.progress_ms = (p.progress_ms + 150).min(p.duration_ms);
+                    p.progress_ms = (p.progress_ms + 33).min(p.duration_ms);
                 }
             }
         }
@@ -383,6 +383,31 @@ async fn main() -> anyhow::Result<()> {
                                 }
                                 // Space = pause/resume
                                 KeyCode::Char(' ') => fire_toggle_pause(&app, &spotify, &tx),
+                                // Next / Prev track
+                                KeyCode::Char('n') => {
+                                    tx.send(AppEvent::SkipNext)?;
+                                    let sp = spotify.clone();
+                                    let tx2 = tx.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = svc::skip_next(&sp).await {
+                                            tracing::error!("skip_next: {e:#}");
+                                            let _ = tx2
+                                                .send(AppEvent::Toast(format!("Skip failed: {e}")));
+                                        }
+                                    });
+                                }
+                                KeyCode::Char('N') => {
+                                    tx.send(AppEvent::SkipPrev)?;
+                                    let sp = spotify.clone();
+                                    let tx2 = tx.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = svc::skip_prev(&sp).await {
+                                            tracing::error!("skip_prev: {e:#}");
+                                            let _ = tx2
+                                                .send(AppEvent::Toast(format!("Skip failed: {e}")));
+                                        }
+                                    });
+                                }
                                 // Search overlay
                                 KeyCode::Char('/') => {
                                     tx.send(AppEvent::OpenSearch)?;
@@ -403,25 +428,6 @@ async fn main() -> anyhow::Result<()> {
                                         && !app.state.explorer_items.is_empty()
                                     {
                                         tx.send(AppEvent::OpenTrackMenu)?;
-                                        // Async: check if track is liked
-                                        if let Some(track) = app
-                                            .state
-                                            .explorer_items
-                                            .get(app.state.explorer_selected_index)
-                                            .cloned()
-                                        {
-                                            let sp = spotify.clone();
-                                            let tx2 = tx.clone();
-                                            tokio::spawn(async move {
-                                                if let Ok(liked) =
-                                                    svc::is_track_liked(&sp, &track.id).await
-                                                {
-                                                    let _ = tx2.send(
-                                                        AppEvent::TrackMenuLikedStatus(liked),
-                                                    );
-                                                }
-                                            });
-                                        }
                                     }
                                 }
                                 KeyCode::Char('q') => tx.send(AppEvent::Quit)?,
@@ -608,48 +614,6 @@ fn fire_track_action(
                     }
                     Err(e) => {
                         tracing::error!("add_to_queue: {e:#}");
-                        let _ = tx2.send(AppEvent::Toast(format!("Failed: {e}")));
-                    }
-                }
-            });
-        }
-        TrackAction::Like => {
-            let name = track.name.clone();
-            tokio::spawn(async move {
-                match svc::like_track(&sp, &track.id).await {
-                    Ok(_) => {
-                        let _ = tx2.send(AppEvent::Toast(format!("♥ Liked: {name}")));
-                    }
-                    Err(e) => {
-                        tracing::error!("like_track: {e:#}");
-                        let _ = tx2.send(AppEvent::Toast(format!("Failed: {e}")));
-                    }
-                }
-            });
-        }
-        TrackAction::Unlike => {
-            let name = track.name.clone();
-            tokio::spawn(async move {
-                match svc::unlike_track(&sp, &track.id).await {
-                    Ok(_) => {
-                        let _ = tx2.send(AppEvent::Toast(format!("♡ Unliked: {name}")));
-                    }
-                    Err(e) => {
-                        tracing::error!("unlike_track: {e:#}");
-                        let _ = tx2.send(AppEvent::Toast(format!("Failed: {e}")));
-                    }
-                }
-            });
-        }
-        TrackAction::AddToPlaylist(playlist_id, playlist_name) => {
-            let name = track.name.clone();
-            tokio::spawn(async move {
-                match svc::add_to_playlist(&sp, &playlist_id, &track.id).await {
-                    Ok(_) => {
-                        let _ = tx2.send(AppEvent::Toast(format!("Added to {playlist_name}")));
-                    }
-                    Err(e) => {
-                        tracing::error!("add_to_playlist: {e:#}");
                         let _ = tx2.send(AppEvent::Toast(format!("Failed: {e}")));
                     }
                 }

@@ -27,6 +27,8 @@ pub enum AppEvent {
         context_uri: Option<String>,
     },
     TogglePause,
+    SkipNext,
+    SkipPrev,
     PlaybackStateUpdated(Option<PlaybackState>),
     DevicesUpdated(Vec<Device>),
 
@@ -40,7 +42,6 @@ pub enum AppEvent {
     OpenTrackMenu,
     CloseTrackMenu,
     TrackMenuQueryChanged(String),
-    TrackMenuLikedStatus(bool), // async result of is_track_liked
     TrackMenuConfirm,
 
     // Toast

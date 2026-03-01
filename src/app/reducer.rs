@@ -105,6 +105,17 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
                 p.is_playing = !p.is_playing;
             }
         }
+        AppEvent::SkipNext => {
+            // Optimistically clear progress — real state arrives on next poll
+            if let Some(p) = &mut state.playback {
+                p.progress_ms = 0;
+            }
+        }
+        AppEvent::SkipPrev => {
+            if let Some(p) = &mut state.playback {
+                p.progress_ms = 0;
+            }
+        }
         AppEvent::PlaybackStateUpdated(ps) => {
             state.playback = ps;
         }
@@ -142,8 +153,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
                 .get(state.explorer_selected_index)
                 .cloned()
             {
-                let playlists = state.playlists.clone();
-                state.track_menu = crate::ui::trackmenu::TrackMenuState::open(track, &playlists);
+                state.track_menu = crate::ui::trackmenu::TrackMenuState::open(track);
                 state.key_mode = KeyMode::TrackMenu;
             }
         }
@@ -153,13 +163,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) {
         }
         AppEvent::TrackMenuQueryChanged(q) => {
             state.track_menu.query = q;
-            let playlists = state.playlists.clone();
-            state.track_menu.rebuild_actions(&playlists);
-        }
-        AppEvent::TrackMenuLikedStatus(liked) => {
-            state.track_menu.is_liked = Some(liked);
-            let playlists = state.playlists.clone();
-            state.track_menu.rebuild_actions(&playlists);
+            state.track_menu.rebuild_actions();
         }
         AppEvent::TrackMenuConfirm => {
             // Handled directly in main.rs (needs spotify handle)

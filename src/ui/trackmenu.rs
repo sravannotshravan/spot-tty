@@ -26,9 +26,6 @@ use ratatui::{
 pub enum TrackAction {
     PlayNow,
     AddToQueue,
-    Like,
-    Unlike,
-    AddToPlaylist(String, String), // (playlist_id, playlist_name)
 }
 
 impl TrackAction {
@@ -36,9 +33,6 @@ impl TrackAction {
         match self {
             Self::PlayNow => "▶  Play now".to_string(),
             Self::AddToQueue => "+  Add to queue".to_string(),
-            Self::Like => "♥  Like this track".to_string(),
-            Self::Unlike => "♡  Unlike this track".to_string(),
-            Self::AddToPlaylist(_, n) => format!("↗  Add to playlist: {n}"),
         }
     }
 }
@@ -49,8 +43,6 @@ impl TrackAction {
 pub struct TrackMenuState {
     /// The track this menu is open for
     pub track: Option<TrackSummary>,
-    /// Whether the track is currently liked (fetched async after menu opens)
-    pub is_liked: Option<bool>,
     /// Typed filter query
     pub query: String,
     /// Filtered action list
@@ -59,34 +51,19 @@ pub struct TrackMenuState {
 }
 
 impl TrackMenuState {
-    pub fn open(
-        track: TrackSummary,
-        playlists: &[crate::services::spotify::PlaylistSummary],
-    ) -> Self {
+    pub fn open(track: TrackSummary) -> Self {
         let mut s = Self {
             track: Some(track),
-            is_liked: None,
             query: String::new(),
             actions: vec![],
             selected: 0,
         };
-        s.rebuild_actions(playlists);
+        s.rebuild_actions();
         s
     }
 
-    pub fn rebuild_actions(&mut self, playlists: &[crate::services::spotify::PlaylistSummary]) {
-        let mut all: Vec<TrackAction> = vec![
-            TrackAction::PlayNow,
-            TrackAction::AddToQueue,
-            match self.is_liked {
-                Some(true) => TrackAction::Unlike,
-                _ => TrackAction::Like,
-            },
-        ];
-        // Only own playlists can have tracks added
-        for pl in playlists.iter().filter(|p| p.owner) {
-            all.push(TrackAction::AddToPlaylist(pl.id.clone(), pl.name.clone()));
-        }
+    pub fn rebuild_actions(&mut self) {
+        let mut all: Vec<TrackAction> = vec![TrackAction::PlayNow, TrackAction::AddToQueue];
 
         if self.query.is_empty() {
             self.actions = all;
@@ -182,11 +159,6 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             let (icon_color, label_color) = match action {
                 TrackAction::PlayNow => (Color::Rgb(137, 180, 130), Color::Rgb(200, 200, 210)),
                 TrackAction::AddToQueue => (Color::Rgb(137, 220, 235), Color::Rgb(200, 200, 210)),
-                TrackAction::Like => (Color::Rgb(235, 130, 160), Color::Rgb(200, 200, 210)),
-                TrackAction::Unlike => (Color::Rgb(180, 80, 110), Color::Rgb(200, 200, 210)),
-                TrackAction::AddToPlaylist(..) => {
-                    (Color::Rgb(198, 160, 246), Color::Rgb(200, 200, 210))
-                }
             };
             let bg = if is_sel {
                 Color::Rgb(40, 40, 55)

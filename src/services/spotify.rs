@@ -533,6 +533,54 @@ async fn put_no_body(
     }
 }
 
+// ── Skip next / prev ─────────────────────────────────────────────────────────
+
+/// POST /me/player/next — skip to next track
+pub async fn skip_next(sp: &AuthCodePkceSpotify) -> Result<()> {
+    let tok = token(sp).await?;
+    let resp = reqwest::Client::new()
+        .post(format!("{BASE}/me/player/next"))
+        .bearer_auth(&tok)
+        .header("Content-Length", "0")
+        .send()
+        .await?;
+    let s = resp.status().as_u16();
+    match s {
+        200 | 204 => Ok(()),
+        404 => {
+            warn!("skip_next: no active device");
+            Ok(())
+        }
+        _ => bail!(
+            "POST /me/player/next → {s}: {}",
+            resp.text().await.unwrap_or_default()
+        ),
+    }
+}
+
+/// POST /me/player/previous — skip to previous track
+pub async fn skip_prev(sp: &AuthCodePkceSpotify) -> Result<()> {
+    let tok = token(sp).await?;
+    let resp = reqwest::Client::new()
+        .post(format!("{BASE}/me/player/previous"))
+        .bearer_auth(&tok)
+        .header("Content-Length", "0")
+        .send()
+        .await?;
+    let s = resp.status().as_u16();
+    match s {
+        200 | 204 => Ok(()),
+        404 => {
+            warn!("skip_prev: no active device");
+            Ok(())
+        }
+        _ => bail!(
+            "POST /me/player/previous → {s}: {}",
+            resp.text().await.unwrap_or_default()
+        ),
+    }
+}
+
 // ── Device listing ────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -574,70 +622,6 @@ pub async fn fetch_devices(sp: &AuthCodePkceSpotify) -> Result<Vec<Device>> {
 
 /// PUT /me/tracks — save (like) a track
 /// Spotify requires IDs in the JSON body, NOT as query params.
-pub async fn like_track(sp: &AuthCodePkceSpotify, track_id: &str) -> Result<()> {
-    let tok = token(sp).await?;
-    let c = reqwest::Client::new();
-    let body = serde_json::json!({ "ids": [track_id] });
-    let resp = c
-        .put(format!("{BASE}/me/tracks"))
-        .bearer_auth(&tok)
-        .header("Content-Type", "application/json")
-        .body(body.to_string())
-        .send()
-        .await?;
-    let s = resp.status().as_u16();
-    if s == 200 || s == 204 {
-        Ok(())
-    } else {
-        bail!(
-            "PUT /me/tracks → {s}: {}",
-            resp.text().await.unwrap_or_default()
-        )
-    }
-}
-
-/// DELETE /me/tracks — unlike a track
-/// Spotify requires IDs in the JSON body, NOT as query params.
-pub async fn unlike_track(sp: &AuthCodePkceSpotify, track_id: &str) -> Result<()> {
-    let tok = token(sp).await?;
-    let c = reqwest::Client::new();
-    let body = serde_json::json!({ "ids": [track_id] });
-    let resp = c
-        .delete(format!("{BASE}/me/tracks"))
-        .bearer_auth(&tok)
-        .header("Content-Type", "application/json")
-        .body(body.to_string())
-        .send()
-        .await?;
-    let s = resp.status().as_u16();
-    if s == 200 || s == 204 {
-        Ok(())
-    } else {
-        bail!(
-            "DELETE /me/tracks → {s}: {}",
-            resp.text().await.unwrap_or_default()
-        )
-    }
-}
-
-/// GET /me/tracks/contains — check if track is liked
-pub async fn is_track_liked(sp: &AuthCodePkceSpotify, track_id: &str) -> Result<bool> {
-    #[derive(Deserialize)]
-    struct Resp(Vec<bool>);
-    let tok = token(sp).await?;
-    let c = reqwest::Client::new();
-    // Returns an array like [true] or [false]
-    let text = c
-        .get(format!("{BASE}/me/tracks/contains?ids={track_id}"))
-        .bearer_auth(&tok)
-        .send()
-        .await?
-        .text()
-        .await?;
-    let arr: Vec<bool> = serde_json::from_str(&text).unwrap_or_default();
-    Ok(arr.first().copied().unwrap_or(false))
-}
-
 /// POST /me/player/queue — add track to queue
 pub async fn add_to_queue(sp: &AuthCodePkceSpotify, track_id: &str) -> Result<()> {
     let tok = token(sp).await?;
@@ -657,30 +641,6 @@ pub async fn add_to_queue(sp: &AuthCodePkceSpotify, track_id: &str) -> Result<()
             "POST /me/player/queue → {s}: {}",
             resp.text().await.unwrap_or_default()
         )
-    }
-}
-
-/// POST /playlists/{id}/tracks — add track to a playlist
-pub async fn add_to_playlist(
-    sp: &AuthCodePkceSpotify,
-    playlist_id: &str,
-    track_id: &str,
-) -> Result<()> {
-    let tok = token(sp).await?;
-    let c = reqwest::Client::new();
-    let body = serde_json::json!({ "uris": [format!("spotify:track:{track_id}")] });
-    let resp = c
-        .post(format!("{BASE}/playlists/{playlist_id}/tracks"))
-        .bearer_auth(&tok)
-        .header("Content-Type", "application/json")
-        .body(body.to_string())
-        .send()
-        .await?;
-    let s = resp.status().as_u16();
-    if s == 200 || s == 201 {
-        Ok(())
-    } else {
-        bail!("POST /playlists/{playlist_id}/tracks → {s}")
     }
 }
 

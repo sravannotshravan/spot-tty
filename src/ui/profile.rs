@@ -546,6 +546,8 @@ fn render_commands(frame: &mut Frame, area: Rect, _state: &AppState) {
     let play_cmds: &[(&str, &str)] = &[
         ("Enter", "Play selected track"),
         ("Space", "Pause / Resume"),
+        ("n", "Next track"),
+        ("N", "Previous track"),
         ("/", "Search (fuzzy)"),
         ("i", "Track info & actions"),
         ("p", "Profile & stats"),
