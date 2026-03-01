@@ -3,8 +3,6 @@
 A Spotify TUI for your terminal — built with Rust and ratatui.
 Works standalone in any terminal, and as a floating Neovim plugin.
 
-![spot-tty screenshot](https://raw.githubusercontent.com/YOUR_USERNAME/spot-tty/main/screenshot.png)
-
 ## Install
 
 ```bash
