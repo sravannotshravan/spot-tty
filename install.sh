@@ -22,6 +22,10 @@ error() {
 }
 header() { echo -e "\n${BOLD}$*${RESET}"; }
 
+# Detect WSL
+IS_WSL=false
+if grep -qi microsoft /proc/version 2>/dev/null; then IS_WSL=true; fi
+
 REPO="https://github.com/Gaurav-Gali/spot-tty"
 INSTALL_DIR="$HOME/.local/bin"
 # macOS uses ~/Library/Application Support, Linux uses ~/.config
@@ -49,7 +53,23 @@ header "Checking system..."
 OS="$(uname -s)"
 case "$OS" in
 Linux | Darwin) success "OS: $OS" ;;
-*) error "Unsupported OS: $OS (Linux and macOS only)" ;;
+*)
+  echo -e "${YELLOW}"
+  echo "  Windows detected. This script runs on Linux and macOS."
+  echo ""
+  echo "  Option 1 — WSL2 (recommended):"
+  echo "    https://learn.microsoft.com/en-us/windows/wsl/install"
+  echo "    Then re-run this script inside WSL."
+  echo ""
+  echo "  Option 2 — Native Windows build:"
+  echo "    1. Install Rust: https://rustup.rs"
+  echo "    2. git clone https://github.com/Gaurav-Gali/spot-tty"
+  echo "    3. cd spot-tty && RUSTFLAGS="-A warnings" cargo build --release"
+  echo "    4. Add target\release\ to your PATH"
+  echo "    5. Create %APPDATA%\spot-tty\.env with your Spotify credentials"
+  echo -e "${RESET}"
+  exit 0
+  ;;
 esac
 
 # ── 2. Check / install Rust ───────────────────────────────────────────────────

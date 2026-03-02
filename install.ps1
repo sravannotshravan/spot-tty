@@ -13,10 +13,10 @@ Write-Host @"
 
   ███████╗██████╗  ██████╗ ████████╗    ████████╗████████╗██╗   ██╗
   ██╔════╝██╔══██╗██╔═══██╗╚══██╔══╝       ██╔══╝╚══██╔══╝╚██╗ ██╔╝
-  ███████╗██████╔╝██║   ██║   ██║    █████╗ ██║      ██║    ╚████╔╝ 
-  ╚════██║██╔═══╝ ██║   ██║   ██║    ╚════╝ ██║      ██║     ╚██╔╝  
-  ███████║██║     ╚██████╔╝   ██║           ██║      ██║      ██║   
-  ╚══════╝╚═╝      ╚═════╝    ╚═╝           ╚═╝      ╚═╝      ╚═╝   
+  ███████╗██████╔╝██║   ██║   ██║   █████╗ ██║      ██║    ╚████╔╝ 
+  ╚════██║██╔═══╝ ██║   ██║   ██║   ╚════╝ ██║      ██║     ╚██╔╝  
+  ███████║██║     ╚██████╔╝   ██║          ██║      ██║      ██║   
+  ╚══════╝╚═╝      ╚═════╝    ╚═╝          ╚═╝      ╚═╝      ╚═╝   
 
   Spotify TUI for your terminal — Windows installer
 "@ -ForegroundColor Cyan
@@ -49,7 +49,7 @@ Write-Success "Cloned repository"
 
 Write-Header "Building spot-tty (this takes ~1 min on first run)..."
 Push-Location $tmp
-cargo build --release
+$env:RUSTFLAGS = "-A warnings"; cargo build --release
 if ($LASTEXITCODE -ne 0) { Write-Fail "Build failed" }
 Pop-Location
 Write-Success "Build complete"
