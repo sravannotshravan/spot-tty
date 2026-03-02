@@ -7,12 +7,9 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// Loads credentials in priority order:
-    ///   1. Shell environment variables (already exported)
-    ///   2. ~/.config/spot-tty/.env
-    ///   3. .env in the current working directory (dev fallback)
     pub fn load() -> Result<Self> {
-        // 1. Try ~/.config/spot-tty/.env first
+        // 1. Try the platform config dir: ~/Library/Application Support on macOS,
+        //    ~/.config on Linux
         let config_env = dirs::config_dir().map(|p| p.join("spot-tty").join(".env"));
 
         if let Some(ref path) = config_env {
@@ -23,7 +20,7 @@ impl Settings {
             }
         }
 
-        // 2. Also try cwd .env (dev convenience — won't override already-set vars)
+        // 2. cwd .env fallback for development
         let _ = dotenvy::dotenv();
 
         let client_id = std::env::var("RSPOTIFY_CLIENT_ID").unwrap_or_default();

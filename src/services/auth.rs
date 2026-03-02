@@ -1,10 +1,6 @@
-use anyhow::{Context, Result};
-use rspotify::{prelude::*, scopes, AuthCodePkceSpotify, Credentials, OAuth};
-use std::{
-    io::{BufRead, BufReader, Write},
-    net::TcpListener,
-    path::PathBuf,
-};
+use anyhow::Result;
+use rspotify::{prelude::*, scopes, AuthCodePkceSpotify, Config, Credentials, OAuth};
+use std::path::PathBuf;
 use tokio::fs;
 use tracing::{info, warn};
 
@@ -15,16 +11,8 @@ pub fn token_cache_path() -> PathBuf {
         .join("token.json")
 }
 
-pub fn build_client(
-    client_id: &str,
-    client_secret: &str,
-    redirect_uri: &str,
-) -> AuthCodePkceSpotify {
-    let creds = Credentials {
-        id: client_id.to_string(),
-        secret: Some(client_secret.to_string()),
-    };
-
+fn build_client(client_id: &str, _client_secret: &str, redirect_uri: &str) -> AuthCodePkceSpotify {
+    let creds = Credentials::new_pkce(client_id);
     let oauth = OAuth {
         redirect_uri: redirect_uri.to_string(),
         scopes: scopes!(
@@ -43,14 +31,12 @@ pub fn build_client(
         ),
         ..Default::default()
     };
-
-    let config = rspotify::Config {
+    let config = Config {
         token_cached: true,
         token_refreshing: true,
         cache_path: token_cache_path(),
         ..Default::default()
     };
-
     AuthCodePkceSpotify::with_config(creds, oauth, config)
 }
 
@@ -84,19 +70,19 @@ pub async fn authenticate(
         match spotify.read_token_cache(true).await {
             Ok(Some(token)) => {
                 info!("Loaded token from cache");
-                let token_scopes = token.scopes.clone();
+                let flat: String = token.scopes.iter().cloned().collect::<Vec<_>>().join(" ");
                 let has_all_scopes = required_scopes
                     .iter()
-                    .all(|s| token_scopes.contains(&s.to_string()));
-
+                    .all(|s| flat.split_whitespace().any(|t| t == *s));
+                info!("Token scopes: {flat}");
                 if !has_all_scopes {
-                    warn!("Cached token missing required scopes — re-authenticating");
+                    warn!("Cached token missing scopes — re-authenticating");
                     let _ = std::fs::remove_file(token_cache_path());
                 } else {
                     *spotify.token.lock().await.unwrap() = Some(token);
                     match spotify.current_user().await {
                         Ok(_) => {
-                            info!("Cached token valid with all required scopes");
+                            info!("Cached token valid");
                             return Ok(spotify);
                         }
                         Err(e) => {
@@ -105,73 +91,28 @@ pub async fn authenticate(
                     }
                 }
             }
-            Ok(None) => info!("No cached token found"),
+            Ok(None) => info!("No cached token"),
             Err(e) => warn!("Failed to read token cache: {e}"),
         }
     }
 
-    let auth_url = spotify.get_authorize_url(None)?;
-
-    if let Err(e) = open::that(&auth_url) {
-        eprintln!(
-            "\nCould not open browser automatically ({e}).\n\
-             Please open this URL manually:\n\n  {auth_url}\n"
-        );
-    } else {
-        eprintln!("\nOpening Spotify login in your browser…");
+    // Fresh OAuth flow
+    let url = spotify.get_authorize_url(None)?;
+    info!("Opening auth URL: {url}");
+    if let Err(e) = open::that(&url) {
+        eprintln!("Could not open browser: {e}");
+        eprintln!("Open this URL manually:\n  {url}");
     }
 
-    let code = wait_for_callback().context("OAuth callback server failed")?;
-
+    let redirect_url = crate::services::auth_server::wait_for_callback(redirect_uri).await?;
     spotify
-        .request_token(&code)
-        .await
-        .context("Failed to exchange auth code for token")?;
+        .parse_response_code(&redirect_url)
+        .ok_or_else(|| anyhow::anyhow!("Failed to parse OAuth callback"))?;
+    spotify.request_token(&redirect_url).await?;
 
-    spotify
-        .write_token_cache()
-        .await
-        .context("Failed to write token cache")?;
+    if let Err(e) = spotify.write_token_cache().await {
+        warn!("Could not write token cache: {e}");
+    }
 
-    info!("Authentication successful, token cached");
     Ok(spotify)
-}
-
-fn wait_for_callback() -> Result<String> {
-    let listener = TcpListener::bind("127.0.0.1:8888")
-        .context("Could not bind to 127.0.0.1:8888 — is something else using that port?")?;
-
-    eprintln!("Waiting for Spotify to redirect back to http://127.0.0.1:8888/callback …");
-
-    let (stream, _) = listener.accept()?;
-    let mut reader = BufReader::new(&stream);
-
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-
-    let code = parse_code_from_request(&request_line)
-        .context("Spotify callback did not contain a `code` parameter")?;
-
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-        <html><body style=\"font-family:sans-serif;padding:2rem\">\
-        <h2>✓ spot-tty authenticated!</h2>\
-        <p>You can close this tab and return to your terminal.</p>\
-        </body></html>";
-
-    (&stream).write_all(response.as_bytes())?;
-
-    Ok(code)
-}
-
-fn parse_code_from_request(request_line: &str) -> Option<String> {
-    let path = request_line.split_whitespace().nth(1)?;
-    let query = path.split('?').nth(1)?;
-
-    for pair in query.split('&') {
-        let mut kv = pair.splitn(2, '=');
-        if kv.next() == Some("code") {
-            return kv.next().map(|v| v.to_string());
-        }
-    }
-    None
 }

@@ -24,7 +24,12 @@ header() { echo -e "\n${BOLD}$*${RESET}"; }
 
 REPO="https://github.com/Gaurav-Gali/spot-tty"
 INSTALL_DIR="$HOME/.local/bin"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/spot-tty"
+# macOS uses ~/Library/Application Support, Linux uses ~/.config
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  CONFIG_DIR="$HOME/Library/Application Support/spot-tty"
+else
+  CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/spot-tty"
+fi
 NVIM_PLUGIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/plugins/spot-tty.nvim"
 NVIM_LAZY_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/lua/plugins"
 
