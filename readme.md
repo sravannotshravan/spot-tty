@@ -3,21 +3,31 @@
 A Spotify TUI for your terminal — built with Rust and ratatui.
 Works standalone in any terminal, and as a floating Neovim plugin.
 
+![spot-tty screenshot](https://raw.githubusercontent.com/Gaurav-Gali/spot-tty/main/screenshot.png)
+
 ## Install
+
+**macOS / Linux**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Gaurav-Gali/spot-tty/main/install.sh | bash
 ```
 
-The script will:
+**Windows** (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/Gaurav-Gali/spot-tty/main/install.ps1 | iex
+```
+
+The installer will:
 
 1. Install Rust if not already present
-2. Clone and build spot-tty
-3. Place the binary at `~/.local/bin/spot-tty`
+2. Clone and build spot-tty from source
+3. Place the binary on your PATH
 4. Ask for your Spotify API credentials and save them
-5. Optionally install the Neovim plugin (auto-detected)
+5. (macOS/Linux) Optionally install the Neovim plugin
 
-> **Requires:** git, curl. Rust is installed automatically if missing.
+> **Requires:** git, curl (macOS/Linux) or PowerShell 5+ (Windows). Rust is installed automatically.
 
 ---
 

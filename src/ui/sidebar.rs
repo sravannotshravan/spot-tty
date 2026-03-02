@@ -19,7 +19,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut Rende
 
     let name = state.user_name.as_deref().unwrap_or("Connecting…");
     frame.render_widget(
-        Paragraph::new(format!(" {name} (press 'p')"))
+        Paragraph::new(format!(" {name}"))
             .style(Style::default().fg(Color::Rgb(205, 214, 244)))
             .block(
                 Block::default()
@@ -66,8 +66,29 @@ fn render_playlists(frame: &mut Frame, area: Rect, state: &AppState, cache: &mut
 
     let sel = state.navigation.selected_index;
     let visible_rows = (inner.height / COVER_H) as usize;
-    let scroll = sel.saturating_sub(visible_rows.saturating_sub(1));
+    // Clamp scroll so last page doesn't go past end of list
+    let max_scroll = state.playlists.len().saturating_sub(visible_rows);
+    let scroll = sel
+        .saturating_sub(visible_rows.saturating_sub(1))
+        .min(max_scroll);
     let protocol = state.image_protocol;
+
+    // Fill the entire inner area with background first — this erases any
+    // ghost images left over from the previous scroll position
+    {
+        let buf = frame.buffer_mut();
+        for row in 0..inner.height {
+            for col in 0..inner.width {
+                let cell = buf.get_mut(inner.x + col, inner.y + row);
+                cell.set_symbol(" ");
+                cell.set_style(
+                    ratatui::style::Style::default()
+                        .bg(Color::Reset)
+                        .fg(Color::Reset),
+                );
+            }
+        }
+    }
 
     for (slot, pl) in state
         .playlists
@@ -206,7 +227,10 @@ fn trunc(s: &str, max: usize) -> String {
     s.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
 }
 
+/// Render sidebar without any cover images — used when an overlay is open
+/// so Kitty images don't bleed through the modal.
 pub fn render_no_images(frame: &mut Frame, area: Rect, state: &AppState) {
     let mut dummy = RenderCache::default();
     render(frame, area, state, &mut dummy);
+    // dummy.pending is discarded — no images queued
 }
