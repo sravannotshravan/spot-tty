@@ -1,5 +1,8 @@
 # spot-tty
 
+
+This is Gaurav Gali's project, and has been forked with his permission. All I am merely doing is fixing some issues :)
+
 A Spotify TUI for your terminal — built with Rust and ratatui.
 Works standalone in any terminal, and as a floating Neovim plugin.
 
